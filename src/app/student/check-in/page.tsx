@@ -6,27 +6,35 @@ import { createClient } from "@/lib/supabase/client";
 import { useUserRole } from "@/lib/hooks/use-user-role";
 import { useGeolocation } from "@/lib/hooks/use-geolocation";
 import { useCamera } from "@/lib/hooks/use-camera";
+import { useTranslation } from "@/lib/i18n/use-translation";
 import { haversineDistance } from "@/lib/utils/haversine";
 import { formatDistance, formatAccuracy } from "@/lib/utils/format";
 import { detectFraudFlags } from "@/lib/utils/fraud-flags";
-import { MapPin, Camera, CheckCircle, AlertTriangle, Loader2, RotateCcw, Send, Sunrise } from "lucide-react";
 
-type Step = "location" | "selfie" | "review" | "submitting" | "done";
+import { MapPin, Camera, Clock, Gift, RefreshCw, Send, CheckCircle2 } from "lucide-react";
+import { StatefulButton, type ButtonState } from "@/components/ui/stateful-button";
+import { RequirementItem, type RequirementStatus } from "@/components/ui/requirement-item";
+import { ValidationSummary, type ValidationError } from "@/components/ui/validation-summary";
+import { AlertBanner } from "@/components/ui/alert-banner";
+import { toast } from "sonner";
 
 export default function CheckInPage() {
   const { profile } = useUserRole();
+  const { t, interpolate, isClient } = useTranslation();
   const { position, error: geoError, loading: geoLoading, requestPosition } = useGeolocation();
   const { videoRef, preview, blob, active, error: camError, open, capture, retake, close } = useCamera();
   const router = useRouter();
 
-  const [step, setStep] = useState<Step>("location");
   const [school, setSchool] = useState<{ latitude: number; longitude: number; radius_m: number } | null>(null);
   const [enrollment, setEnrollment] = useState<{ class_id: string; school_id: string } | null>(null);
-  const [rewardRules, setRewardRules] = useState<{ attendance_start_time: string; attendance_end_time: string; early_cutoff_time: string } | null>(null);
+  const [rewardRules, setRewardRules] = useState<{ attendance_start_time: string; attendance_end_time: string; early_cutoff_time: string; base_reward: number; early_bonus: number } | null>(null);
+  
   const [distance, setDistance] = useState<number | null>(null);
   const [withinRadius, setWithinRadius] = useState(false);
-  const [submitError, setSubmitError] = useState("");
   const [alreadySubmitted, setAlreadySubmitted] = useState(false);
+  
+  const [submitState, setSubmitState] = useState<ButtonState>("idle");
+  const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
 
   useEffect(() => {
     if (!profile) return;
@@ -39,15 +47,26 @@ export default function CheckInPage() {
 
       const [schoolRes, rulesRes, todayRes] = await Promise.all([
         supabase.from("schools").select("latitude, longitude, radius_m").eq("id", schoolId).single(),
-        supabase.from("reward_rules").select("attendance_start_time, attendance_end_time, early_cutoff_time").eq("school_id", schoolId).single(),
+        supabase.from("reward_rules").select("*").eq("school_id", schoolId).single(),
         supabase.from("attendance_logs").select("id").eq("student_id", profile!.id).eq("attendance_date", new Date().toISOString().split("T")[0]).limit(1),
       ]);
       if (schoolRes.data) setSchool(schoolRes.data);
-      if (rulesRes.data) setRewardRules(rulesRes.data);
+      if (rulesRes.data) setRewardRules(rulesRes.data as any);
       if (todayRes.data && todayRes.data.length > 0) setAlreadySubmitted(true);
     }
     loadMeta();
   }, [profile]);
+
+  useEffect(() => {
+    // Automatically start camera on mount if not active
+    if (isClient && !active && !preview) {
+      open();
+    }
+    // Auto request position if we don't have it yet
+    if (isClient && !position && !geoLoading && !geoError) {
+       requestPosition();
+    }
+  }, [isClient, active, preview, position, geoLoading, geoError]);
 
   useEffect(() => {
     if (position && school) {
@@ -58,7 +77,7 @@ export default function CheckInPage() {
   }, [position, school]);
 
   const isInTimeWindow = () => {
-    if (!rewardRules) return true;
+    if (!rewardRules) return true; // Default to true while loading
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     return timeStr >= rewardRules.attendance_start_time && timeStr <= rewardRules.attendance_end_time;
@@ -71,14 +90,61 @@ export default function CheckInPage() {
     return timeStr <= rewardRules.early_cutoff_time;
   };
 
+  // Requirement status calculators
+  const getRadiusStatus = (): RequirementStatus => {
+    if (geoError) return "blocked";
+    if (!position || distance === null) return "pending";
+    return withinRadius ? "complete" : "blocked";
+  };
+
+  const getSelfieStatus = (): RequirementStatus => {
+    if (camError) return "blocked";
+    return preview ? "complete" : "pending";
+  };
+
+  const getAccuracyStatus = (): RequirementStatus => {
+    if (!position) return "pending";
+    if (position.accuracy > 100) return "blocked";
+    if (position.accuracy > 50) return "warning";
+    return "complete";
+  };
+
+  const getTimeStatus = (): RequirementStatus => {
+    if (!rewardRules) return "pending";
+    return isInTimeWindow() ? "complete" : "blocked";
+  };
+
+  const validateAll = () => {
+    const errors: ValidationError[] = [];
+    
+    if (getRadiusStatus() === "blocked") {
+      errors.push({ id: "section-location", message: geoError ? t.checkin.errors.weakGps : interpolate(t.checkin.errors.outsideRadius, { radius: `${school?.radius_m || 200}m` }) });
+    }
+    if (getSelfieStatus() === "blocked" || !blob) {
+      errors.push({ id: "section-selfie", message: t.checkin.errors.noSelfie });
+    }
+    if (getAccuracyStatus() === "blocked") {
+      errors.push({ id: "section-location", message: t.checkin.errors.weakGps });
+    }
+    if (getTimeStatus() === "blocked") {
+      errors.push({ id: "section-time", message: t.checkin.errors.windowClosed });
+    }
+    
+    setValidationErrors(errors);
+    return errors.length === 0;
+  };
+
   const handleSubmit = async () => {
+    if (!validateAll()) {
+      toast.error("Please fix the issues highlighted above.");
+      return;
+    }
+
     if (!profile || !position || !blob || !enrollment) return;
-    setStep("submitting");
-    setSubmitError("");
+    setSubmitState("loading");
 
     const supabase = createClient();
     try {
-      // Upload selfie
       const fileName = `${profile.id}/${Date.now()}.jpg`;
       const { error: uploadErr } = await supabase.storage.from("attendance-selfies").upload(fileName, blob, { contentType: "image/jpeg" });
       if (uploadErr) throw uploadErr;
@@ -113,136 +179,181 @@ export default function CheckInPage() {
       });
       if (insertErr) throw insertErr;
 
-      close();
-      setStep("done");
-    } catch (err: unknown) {
-      setSubmitError(err instanceof Error ? err.message : "Submission failed");
-      setStep("review");
+      setSubmitState("success");
+      toast.success(t.checkin.submit.success);
+      close(); // shut off camera
+    } catch (err: any) {
+      setSubmitState("idle");
+      toast.error(err.message || t.checkin.errors.submissionFailed);
     }
   };
 
+  if (!isClient) return null;
+
   if (alreadySubmitted) {
     return (
-      <div className="animate-fade-in text-center py-16">
-        <div className="h-16 w-16 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto mb-4"><CheckCircle className="h-8 w-8 text-emerald-500" /></div>
-        <h1 className="text-xl font-bold mb-2">Already Checked In</h1>
-        <p className="text-muted-foreground text-sm mb-6">You have already submitted attendance for today.</p>
-        <button onClick={() => router.push("/student")} className="px-6 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm">Back to Dashboard</button>
+      <div className="animate-fade-in flex flex-col items-center justify-center text-center py-24 px-4 max-w-md mx-auto h-full">
+        <div className="h-20 w-20 rounded-full bg-success/20 flex items-center justify-center mb-6 ring-8 ring-success/5">
+          <CheckCircle2 className="h-10 w-10 text-success" />
+        </div>
+        <h1 className="text-2xl font-bold mb-3">{t.checkin.submit.alreadyDone}</h1>
+        <p className="text-muted-foreground mb-8 text-lg">{t.checkin.submit.alreadyDoneDesc}</p>
+        <StatefulButton 
+          label={t.checkin.submit.backToDashboard}
+          onClick={() => router.push("/student")} 
+        />
       </div>
     );
   }
 
-  if (step === "done") {
+  if (submitState === "success") {
     return (
-      <div className="animate-fade-in text-center py-16">
-        <div className="h-16 w-16 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto mb-4 animate-confetti-pop"><CheckCircle className="h-8 w-8 text-emerald-500" /></div>
-        <h1 className="text-xl font-bold mb-2">Attendance Submitted! 🎉</h1>
-        <p className="text-muted-foreground text-sm mb-6">Your check-in is pending review.</p>
-        <button onClick={() => router.push("/student")} className="px-6 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm">Back to Dashboard</button>
+      <div className="animate-fade-in flex flex-col items-center justify-center text-center py-24 px-4 max-w-md mx-auto h-full">
+        <div className="h-20 w-20 rounded-full bg-success/20 flex items-center justify-center mb-6 animate-confetti-pop ring-8 ring-success/5">
+          <CheckCircle2 className="h-10 w-10 text-success" />
+        </div>
+        <h1 className="text-2xl font-bold mb-3">{t.checkin.submit.success}</h1>
+        <p className="text-muted-foreground mb-8 text-lg px-4">{t.checkin.submit.successDesc}</p>
+        <StatefulButton 
+          label={t.checkin.submit.backToDashboard}
+          onClick={() => router.push("/student")} 
+        />
       </div>
     );
   }
+
+  // Count met requirements for progress summary
+  const requirementsList = [getRadiusStatus(), getSelfieStatus(), getAccuracyStatus(), getTimeStatus()];
+  const metCount = requirementsList.filter(s => s === "complete" || s === "warning").length;
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-lg mx-auto">
-      <div><h1 className="text-xl font-bold">Daily Check-In</h1><p className="text-muted-foreground text-sm mt-1">Verify your location and take a selfie</p></div>
-
-      {/* Step indicators */}
-      <div className="flex items-center gap-2">
-        {["Location", "Selfie", "Submit"].map((label, i) => {
-          const stepIdx = i === 0 ? "location" : i === 1 ? "selfie" : "review";
-          const steps: Step[] = ["location", "selfie", "review", "submitting"];
-          const currentIdx = steps.indexOf(step);
-          const isCompleted = currentIdx > i;
-          const isCurrent = (i === 0 && step === "location") || (i === 1 && step === "selfie") || (i === 2 && (step === "review" || step === "submitting"));
-          return (
-            <div key={stepIdx} className="flex items-center gap-2 flex-1">
-              <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${isCompleted ? "bg-primary text-primary-foreground" : isCurrent ? "bg-primary/20 text-primary border-2 border-primary" : "bg-muted text-muted-foreground"}`}>{isCompleted ? "✓" : i + 1}</div>
-              <span className="text-xs font-medium hidden sm:block">{label}</span>
-              {i < 2 && <div className="flex-1 h-px bg-border" />}
-            </div>
-          );
-        })}
+    <div className="space-y-6 animate-fade-in max-w-lg mx-auto pb-12">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold">{t.checkin.title}</h1>
+        <p className="text-muted-foreground mt-1">{t.checkin.subtitle}</p>
       </div>
 
-      {/* Location step */}
-      {step === "location" && (
-        <div className="glass rounded-2xl p-6 space-y-5">
-          <div className="text-center">
-            <MapPin className="h-10 w-10 text-primary mx-auto mb-3" />
-            <h2 className="font-semibold">Enable Location</h2>
-            <p className="text-sm text-muted-foreground mt-1">We need to verify you are at school</p>
-          </div>
-          {geoError && <div className="bg-destructive/10 text-destructive text-sm rounded-lg p-3">{geoError === "PERMISSION_DENIED" ? "Location permission denied. Please enable in browser settings." : "Unable to get location. Try again."}</div>}
-          {position && distance !== null && (
-            <div className="space-y-3">
-              <div className={`rounded-xl p-4 text-center ${withinRadius ? "bg-emerald-500/10 border border-emerald-500/20" : "bg-amber-500/10 border border-amber-500/20"}`}>
-                <p className="text-2xl font-bold">{formatDistance(distance)}</p>
-                <p className="text-sm text-muted-foreground">from school</p>
-                <div className="mt-2 flex items-center justify-center gap-1.5">
-                  {withinRadius ? <CheckCircle className="h-4 w-4 text-emerald-500" /> : <AlertTriangle className="h-4 w-4 text-amber-500" />}
-                  <span className={`text-xs font-medium ${withinRadius ? "text-emerald-500" : "text-amber-500"}`}>{withinRadius ? "Inside radius" : "Outside radius"}</span>
-                </div>
+      {/* Live Readiness Checklist */}
+      <div className="card p-5 rounded-2xl space-y-1">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3 px-2">
+          {interpolate(t.checkin.requirementsMet, { count: metCount, total: 4 })}
+        </p>
+        <RequirementItem label={t.checkin.requirements.insideArea} status={getRadiusStatus()} detail={distance !== null ? interpolate(t.checkin.location.outsideRadius, { distance: formatDistance(distance) }).split(".")[0] : ""} />
+        <RequirementItem label={t.checkin.requirements.selfieCaptured} status={getSelfieStatus()} />
+        <RequirementItem label={t.checkin.requirements.gpsAccuracy} status={getAccuracyStatus()} detail={position ? `${formatAccuracy(position.accuracy)}` : ""} />
+        <RequirementItem label={t.checkin.requirements.timeWindow} status={getTimeStatus()} />
+      </div>
+
+      <ValidationSummary errors={validationErrors} />
+
+      {/* Location Section */}
+      <section id="section-location" className="card rounded-2xl overflow-hidden">
+        <div className="p-4 bg-muted/30 border-b border-border flex items-center gap-2">
+          <MapPin className="h-5 w-5 text-primary" />
+          <h2 className="font-semibold text-base">{t.checkin.location.title}</h2>
+        </div>
+        <div className="p-5 space-y-4">
+          {geoError ? (
+            <AlertBanner variant="error" title="Location Error" description={geoError === "PERMISSION_DENIED" ? t.checkin.location.permissionDenied : t.checkin.errors.weakGps} action={<button onClick={requestPosition} className="text-sm font-medium underline text-destructive">Try Again</button>} />
+          ) : !position ? (
+            <div className="py-6 flex flex-col items-center justify-center text-center text-muted-foreground">
+               <RefreshCw className="h-6 w-6 animate-spin mb-3 text-primary/50" />
+               <p className="text-sm">{t.checkin.location.loading}</p>
+            </div>
+          ) : (
+            <>
+              <div className={`rounded-xl p-5 text-center transition-colors border ${withinRadius ? "bg-success/5 border-success/20 text-success" : "bg-destructive/5 border-destructive/20 text-destructive"}`}>
+                <p className="text-3xl font-bold tracking-tight">{formatDistance(distance || 0)}</p>
+                <p className="text-sm opacity-80 mt-1">{t.checkin.location.fromSchool}</p>
               </div>
-              <p className="text-xs text-muted-foreground text-center">Accuracy: {formatAccuracy(position.accuracy)}</p>
-              {isBeforeEarlyCutoff() && <div className="flex items-center justify-center gap-1.5 text-amber-500"><Sunrise className="h-4 w-4" /><span className="text-xs font-medium">Early Bird Bonus!</span></div>}
+              
+              <div className="flex items-center justify-between text-sm px-1">
+                <span className="text-muted-foreground">{t.checkin.location.accuracy}: {formatAccuracy(position.accuracy)}</span>
+                <span className="text-muted-foreground">{t.checkin.location.radius}: {school?.radius_m || 200}m</span>
+              </div>
+              
+              <button onClick={requestPosition} disabled={geoLoading} className="w-full py-2.5 rounded-lg bg-muted text-foreground text-sm font-medium flex items-center justify-center gap-2 hover:bg-muted/80 active:scale-[0.98] transition-all">
+                <RefreshCw className={`h-4 w-4 ${geoLoading ? 'animate-spin' : ''}`} />
+                {t.checkin.location.refresh}
+              </button>
+            </>
+          )}
+        </div>
+      </section>
+
+      {/* Selfie Section */}
+      <section id="section-selfie" className="card rounded-2xl overflow-hidden">
+        <div className="p-4 bg-muted/30 border-b border-border flex items-center gap-2">
+          <Camera className="h-5 w-5 text-primary" />
+          <h2 className="font-semibold text-base">{t.checkin.selfie.title}</h2>
+        </div>
+        <div className="p-5 space-y-4">
+          {camError ? (
+            <AlertBanner variant="error" title="Camera Error" description={t.checkin.selfie.permissionDenied} action={<button onClick={open} className="text-sm font-medium underline text-destructive">Try Again</button>} />
+          ) : (
+            <div className="relative rounded-xl overflow-hidden bg-black aspect-[4/3] shadow-inner">
+              {!preview && !active ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-white/50">
+                  <Camera className="h-10 w-10 mb-3 opacity-50" />
+                  <p className="text-sm">{t.checkin.selfie.required}</p>
+                </div>
+              ) : (
+                <>
+                  <video ref={videoRef} autoPlay playsInline muted className={`w-full h-full object-cover ${preview ? "hidden" : ""}`} style={{ transform: "scaleX(-1)" }} />
+                  {preview && <img src={preview} alt="Selfie preview" className="w-full h-full object-cover" style={{ transform: "scaleX(-1)" }} />}
+                </>
+              )}
             </div>
           )}
-          {!position ? (
-            <button onClick={requestPosition} disabled={geoLoading} className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm disabled:opacity-50 flex items-center justify-center gap-2">
-              {geoLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
-              {geoLoading ? "Getting location..." : "Get My Location"}
-            </button>
-          ) : (
-            <button onClick={() => { setStep("selfie"); open(); }} className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm flex items-center justify-center gap-2">
-              <Camera className="h-4 w-4" /> Next: Take Selfie
-            </button>
+          
+          <div className="flex gap-3">
+             {!preview && active ? (
+               <StatefulButton label={t.checkin.selfie.take} icon={Camera} onClick={capture} />
+             ) : preview ? (
+               <>
+                 <StatefulButton label={t.checkin.selfie.retake} variant="secondary" onClick={retake} />
+               </>
+             ) : !camError ? (
+               <StatefulButton label="Open Camera" icon={Camera} onClick={open} />
+             ) : null}
+          </div>
+        </div>
+      </section>
+
+      {/* Time & Reward Section */}
+      <section id="section-time" className="card rounded-2xl overflow-hidden">
+        <div className="p-4 bg-muted/30 border-b border-border flex items-center gap-2">
+          <Clock className="h-5 w-5 text-primary" />
+          <h2 className="font-semibold text-base">{t.checkin.time.title}</h2>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="flex justify-between items-center text-sm">
+            <span className="text-muted-foreground">{t.checkin.time.window}</span>
+            <span className="font-medium">{rewardRules?.attendance_start_time || "--:--"} - {rewardRules?.attendance_end_time || "--:--"}</span>
+          </div>
+          
+          {rewardRules && (
+            <AlertBanner 
+              variant={isBeforeEarlyCutoff() ? "success" : "info"} 
+              title={isBeforeEarlyCutoff() ? "Early Bonus Active!" : t.checkin.time.earlyBonus} 
+              description={interpolate(t.checkin.time.earlyBonusDesc, { time: rewardRules.early_cutoff_time, amount: `Rp${rewardRules.early_bonus}` })}
+            />
           )}
         </div>
-      )}
+      </section>
 
-      {/* Selfie step */}
-      {step === "selfie" && (
-        <div className="glass rounded-2xl p-6 space-y-5">
-          <div className="text-center"><Camera className="h-10 w-10 text-primary mx-auto mb-3" /><h2 className="font-semibold">Take a Selfie</h2><p className="text-sm text-muted-foreground mt-1">Show that you are physically at school</p></div>
-          {camError && <div className="bg-destructive/10 text-destructive text-sm rounded-lg p-3">{camError}</div>}
-          <div className="relative rounded-xl overflow-hidden bg-black aspect-[4/3]">
-            <video ref={videoRef} autoPlay playsInline muted className={`w-full h-full object-cover ${preview ? "hidden" : ""}`} style={{ transform: "scaleX(-1)" }} />
-            {preview && <img src={preview} alt="Selfie preview" className="w-full h-full object-cover" style={{ transform: "scaleX(-1)" }} />}
-          </div>
-          <div className="flex gap-3">
-            {!preview && active ? (
-              <button onClick={capture} className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm flex items-center justify-center gap-2"><Camera className="h-4 w-4" /> Capture</button>
-            ) : preview ? (
-              <>
-                <button onClick={retake} className="flex-1 py-3 rounded-xl bg-muted text-foreground font-semibold text-sm flex items-center justify-center gap-2"><RotateCcw className="h-4 w-4" /> Retake</button>
-                <button onClick={() => setStep("review")} className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm flex items-center justify-center gap-2"><CheckCircle className="h-4 w-4" /> Use Photo</button>
-              </>
-            ) : (
-              <button onClick={open} className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm">Open Camera</button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Review step */}
-      {(step === "review" || step === "submitting") && (
-        <div className="glass rounded-2xl p-6 space-y-5">
-          <h2 className="font-semibold text-center">Review & Submit</h2>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div className="bg-muted rounded-xl p-3"><p className="text-xs text-muted-foreground">Distance</p><p className="font-medium">{formatDistance(distance || 0)}</p></div>
-            <div className="bg-muted rounded-xl p-3"><p className="text-xs text-muted-foreground">Accuracy</p><p className="font-medium">{formatAccuracy(position?.accuracy || 0)}</p></div>
-            <div className="bg-muted rounded-xl p-3"><p className="text-xs text-muted-foreground">In Radius</p><p className={`font-medium ${withinRadius ? "text-emerald-500" : "text-amber-500"}`}>{withinRadius ? "Yes" : "No"}</p></div>
-            <div className="bg-muted rounded-xl p-3"><p className="text-xs text-muted-foreground">Time Window</p><p className={`font-medium ${isInTimeWindow() ? "text-emerald-500" : "text-amber-500"}`}>{isInTimeWindow() ? "Yes" : "No"}</p></div>
-          </div>
-          {preview && <img src={preview} alt="Selfie" className="w-full rounded-xl aspect-[4/3] object-cover" style={{ transform: "scaleX(-1)" }} />}
-          {submitError && <div className="bg-destructive/10 text-destructive text-sm rounded-lg p-3">{submitError}</div>}
-          <button onClick={handleSubmit} disabled={step === "submitting"} className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm disabled:opacity-50 flex items-center justify-center gap-2">
-            {step === "submitting" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            {step === "submitting" ? "Submitting..." : "Submit Attendance"}
-          </button>
-        </div>
-      )}
+      {/* Submit Area */}
+      <div className="pt-4 sticky bottom-6 z-20 pb-safe">
+        <StatefulButton 
+          label={t.checkin.submit.button} 
+          loadingLabel={t.checkin.submit.submitting}
+          state={submitState}
+          icon={Send} 
+          onClick={handleSubmit} 
+          className="shadow-lg shadow-primary/25"
+        />
+      </div>
     </div>
   );
 }

@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { Users, GraduationCap, Search, Activity } from "lucide-react";
+import { useTranslation } from "@/lib/i18n/use-translation";
+import { Users, GraduationCap, Search, Activity, Calendar } from "lucide-react";
 import { EmptyState } from "@/components/shared/empty-state";
 
 type StudentData = {
@@ -15,6 +17,7 @@ type StudentData = {
 };
 
 export default function TeacherStudentsPage() {
+  const { t, interpolate, isClient } = useTranslation();
   const [students, setStudents] = useState<StudentData[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -97,64 +100,81 @@ export default function TeacherStudentsPage() {
     return s.full_name.toLowerCase().includes(search) || s.class_name.toLowerCase().includes(search);
   });
 
-  if (loading) return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
+  if (!isClient || loading) {
+    return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
+  }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in pb-12">
+      {/* Header section with search */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold flex items-center gap-2">
-            <Users className="h-5 w-5 text-indigo-500" /> My Students
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <Users className="h-6 w-6 text-primary" /> {t.teacher.myStudents}
           </h1>
-          <p className="text-muted-foreground text-sm mt-1">Roster of all students enrolled in your classes</p>
+          <p className="text-muted-foreground text-sm mt-1">{t.teacher.myStudentsDesc}</p>
         </div>
         <div className="relative max-w-sm w-full">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-3.5 top-3.5 h-4 w-4 text-muted-foreground" />
           <input 
             type="text" 
-            placeholder="Search by name or class..." 
+            placeholder={t.teacher.searchPlaceholder} 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 rounded-xl bg-card border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" 
+            className="w-full pl-10 pr-4 py-3 rounded-xl bg-card border border-border/80 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all font-semibold" 
           />
         </div>
       </div>
 
       {students.length === 0 ? (
-        <EmptyState icon={Users} title="No students found" description="You don't have any students enrolled in your classes yet." />
+        <EmptyState 
+          icon={Users} 
+          title={t.teacher.noStudents} 
+          description={t.teacher.noStudentsDesc} 
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredStudents.map((student) => (
-            <div key={student.id} className="glass rounded-xl p-5 hover:border-indigo-500/30 transition-colors flex flex-col justify-between h-full">
+            <Link 
+              key={student.id} 
+              href={`/teacher/student/${student.id}`} 
+              className="card rounded-2xl p-5 hover:border-primary/40 active:scale-[0.99] transition-all flex flex-col justify-between h-full group"
+            >
               <div>
-                <div className="flex items-start justify-between mb-3">
+                <div className="flex items-start justify-between mb-3 border-b border-border/50 pb-3">
                   <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
-                      <GraduationCap className="h-5 w-5 text-indigo-500" />
+                    <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/25 transition-colors">
+                      <GraduationCap className="h-5 w-5 text-primary" />
                     </div>
                     <div>
-                      <h3 className="font-bold text-sm leading-tight">{student.full_name}</h3>
-                      <p className="text-xs text-muted-foreground truncate w-32">{student.email}</p>
+                      <h3 className="font-bold text-sm leading-tight group-hover:text-primary transition-colors">{student.full_name}</h3>
+                      <p className="text-xs text-muted-foreground truncate w-40 font-medium mt-0.5">{student.email}</p>
                     </div>
                   </div>
                 </div>
                 
-                <div className="mt-4 space-y-2">
-                  <div className="flex items-center justify-between text-sm border-b border-border/50 pb-2">
-                    <span className="text-muted-foreground text-xs">Class</span>
-                    <span className="font-medium bg-muted px-2 py-0.5 rounded text-xs">{student.class_name}</span>
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <span className="text-muted-foreground">{t.teacher.myClasses.replace("Saya", "").trim() || "Class"}</span>
+                    <span className="bg-muted px-2.5 py-1 rounded-lg text-foreground font-bold">{student.class_name}</span>
                   </div>
-                  <div className="flex items-center justify-between text-sm border-b border-border/50 pb-2">
-                    <span className="text-muted-foreground text-xs">Total Check-ins</span>
-                    <span className="font-medium text-emerald-500 flex items-center gap-1"><Activity className="h-3 w-3" /> {student.attendance_count}</span>
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <span className="text-muted-foreground">{t.teacher.totalCheckins}</span>
+                    <span className="text-success flex items-center gap-1">
+                      <Activity className="h-3.5 w-3.5" /> 
+                      {student.attendance_count}
+                    </span>
                   </div>
-                  <div className="flex items-center justify-between text-sm pt-1">
-                    <span className="text-muted-foreground text-xs">Last Seen</span>
-                    <span className="font-medium text-xs">{student.last_attendance ? student.last_attendance : "Never"}</span>
+                  <div className="flex items-center justify-between text-xs font-semibold pt-1 border-t border-border/40">
+                    <span className="text-muted-foreground">{t.teacher.lastSeen}</span>
+                    <span className="text-muted-foreground flex items-center gap-1">
+                      <Calendar className="h-3.5 w-3.5 text-muted-foreground/60" />
+                      {student.last_attendance ? student.last_attendance : t.teacher.never}
+                    </span>
                   </div>
                 </div>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       )}

@@ -179,8 +179,8 @@ export function Sidebar({ role, userName }: { role: UserRole; userName: string }
       </header>
 
       {/* Mobile bottom nav - scrollable horizontally for many items */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-card/90 backdrop-blur-xl border-t border-border safe-area-bottom">
-        <div className="flex items-center gap-1 px-2 py-2 overflow-x-auto hide-scrollbar">
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-card/90 backdrop-blur-xl border-t border-border safe-area-bottom shadow-[0_-4px_24px_rgba(0,0,0,0.04)] dark:shadow-[0_-4px_24px_rgba(0,0,0,0.2)]">
+        <div className="flex items-center justify-around gap-1 px-2 py-1.5 overflow-x-auto hide-scrollbar">
           {allItems.map((item) => {
             const isActive = pathname === item.href || (item.href !== `/${role}` && pathname.startsWith(item.href));
             return (
@@ -188,12 +188,17 @@ export function Sidebar({ role, userName }: { role: UserRole; userName: string }
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl text-[10px] font-medium transition-colors min-w-[64px] shrink-0",
-                  isActive ? "text-primary" : "text-muted-foreground"
+                  "relative flex flex-col items-center justify-center gap-1 w-16 h-12 rounded-xl text-[10px] font-medium transition-all active:scale-95",
+                  isActive ? "text-primary" : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                <item.icon className={cn("h-5 w-5", isActive && "animate-streak-fire")} />
-                <span className="truncate w-full text-center">{item.label}</span>
+                <div className={cn("relative flex items-center justify-center p-1 rounded-full transition-all duration-300", isActive && "bg-primary/10 text-primary")}>
+                  <item.icon className={cn("h-5 w-5 transition-transform duration-300", isActive && "scale-110")} />
+                </div>
+                <span className={cn("truncate w-full text-center transition-all duration-300", isActive ? "opacity-100 font-bold" : "opacity-80")}>{item.label}</span>
+                {isActive && (
+                  <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-primary animate-slide-up" />
+                )}
               </Link>
             );
           })}
