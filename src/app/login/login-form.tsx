@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { GraduationCap, Eye, EyeOff, Loader2, CheckCircle2 } from "lucide-react";
 
@@ -16,10 +16,10 @@ export default function LoginForm() {
   const [successMessage, setSuccessMessage] = useState("");
   const [error, setError] = useState("");
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   useEffect(() => {
-    const code = searchParams.get("code");
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
     if (code) {
       const handleCodeExchange = async () => {
         setLoading(true);
@@ -58,11 +58,11 @@ export default function LoginForm() {
       return;
     }
 
-    const urlError = searchParams.get("error");
+    const urlError = params.get("error");
     if (urlError) {
       setError(urlError);
     }
-  }, [searchParams]);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
