@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useTranslation } from "@/lib/i18n/use-translation";
 import { BarChart3, TrendingUp, Users, Calendar } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { format, subDays } from "date-fns";
@@ -14,6 +15,7 @@ interface ChartData {
 }
 
 export default function AdminReportsPage() {
+  const { t, isClient } = useTranslation();
   const [data, setData] = useState<ChartData[]>([]);
   const [stats, setStats] = useState({ totalStudents: 0, averageRate: 0, totalClasses: 0 });
   const [loading, setLoading] = useState(true);
@@ -70,15 +72,15 @@ export default function AdminReportsPage() {
     load();
   }, []);
 
-  if (loading) return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
+  if (!isClient || loading) return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
 
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
         <h1 className="text-xl font-bold flex items-center gap-2 text-cyan-500">
-          <BarChart3 className="h-5 w-5" /> Analytics & Reports
+          <BarChart3 className="h-5 w-5" /> {t.adminReports.title}
         </h1>
-        <p className="text-muted-foreground text-sm mt-1">School-wide performance metrics for the last 7 days</p>
+        <p className="text-muted-foreground text-sm mt-1">{t.adminReports.subtitle}</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -87,7 +89,7 @@ export default function AdminReportsPage() {
             <TrendingUp className="h-6 w-6" />
           </div>
           <div>
-            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Avg Attendance</p>
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">{t.adminReports.avgAttendance}</p>
             <p className="text-2xl font-bold">{stats.averageRate}%</p>
           </div>
         </div>
@@ -97,7 +99,7 @@ export default function AdminReportsPage() {
             <Users className="h-6 w-6" />
           </div>
           <div>
-            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Total Students</p>
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">{t.adminReports.totalStudents}</p>
             <p className="text-2xl font-bold">{stats.totalStudents}</p>
           </div>
         </div>
@@ -107,7 +109,7 @@ export default function AdminReportsPage() {
             <Calendar className="h-6 w-6" />
           </div>
           <div>
-            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Active Classes</p>
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">{t.adminReports.activeClasses}</p>
             <p className="text-2xl font-bold">{stats.totalClasses}</p>
           </div>
         </div>
@@ -115,7 +117,7 @@ export default function AdminReportsPage() {
 
       {/* Chart */}
       <div className="glass rounded-2xl p-6 h-[400px]">
-        <h2 className="font-bold mb-6 text-sm">7-Day Attendance Volume</h2>
+        <h2 className="font-bold mb-6 text-sm">{t.adminReports.chartTitle}</h2>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.5} />
@@ -126,9 +128,9 @@ export default function AdminReportsPage() {
               contentStyle={{ backgroundColor: 'var(--card)', borderRadius: '12px', border: '1px solid var(--border)', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
             />
             <Legend wrapperStyle={{ paddingTop: '20px' }} />
-            <Bar dataKey="approved" name="Approved" fill="#10b981" radius={[4, 4, 0, 0]} stackId="a" />
-            <Bar dataKey="flagged" name="Flagged (Pending)" fill="#f59e0b" radius={[0, 0, 0, 0]} stackId="a" />
-            <Bar dataKey="rejected" name="Rejected" fill="#ef4444" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="approved" name={t.adminReports.approved} fill="#10b981" radius={[4, 4, 0, 0]} stackId="a" />
+            <Bar dataKey="flagged" name={t.adminReports.flagged} fill="#f59e0b" radius={[0, 0, 0, 0]} stackId="a" />
+            <Bar dataKey="rejected" name={t.adminReports.rejected} fill="#ef4444" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>

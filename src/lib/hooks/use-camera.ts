@@ -9,17 +9,40 @@ export function useCamera() {
   const [preview, setPreview] = useState<string | null>(null);
   const [blob, setBlob] = useState<Blob | null>(null);
   const [active, setActive] = useState(false);
+  const [initializing, setInitializing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isInitializingRef = useRef(false);
 
   const open = useCallback(async () => {
-    if (!videoRef.current) return;
+    if (!videoRef.current || isInitializingRef.current) return;
+    isInitializingRef.current = true;
     setError(null);
+    setInitializing(true);
+    
+    // Explicit check for mobile/network HTTP blocking
+    if (typeof window !== "undefined" && !window.isSecureContext && window.location.hostname !== "localhost") {
+      setError("This browser cannot access the camera here (HTTPS required).");
+      setInitializing(false);
+      return;
+    }
+
     try {
       const stream = await startCamera(videoRef.current);
       streamRef.current = stream;
       setActive(true);
-    } catch {
-      setError("Camera permission denied or unavailable.");
+    } catch (err: any) {
+      console.error("Camera Error Details:", err);
+      const name = err?.name || "";
+      if (name === "NotAllowedError") {
+        setError("Camera access is blocked. Enable it in browser site settings.");
+      } else if (name === "NotFoundError") {
+        setError("No camera hardware found on this device.");
+      } else {
+        setError(`Camera could not start (${name}). Try switching browser or reloading.`);
+      }
+    } finally {
+      isInitializingRef.current = false;
+      setInitializing(false);
     }
   }, []);
 
@@ -56,5 +79,5 @@ export function useCamera() {
     setBlob(null);
   }, []);
 
-  return { videoRef, preview, blob, active, error, open, capture, retake, close };
+  return { videoRef, preview, blob, active, initializing, error, open, capture, retake, close };
 }

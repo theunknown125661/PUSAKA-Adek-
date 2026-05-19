@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useTranslation } from "@/lib/i18n/use-translation";
 import { FileText, Search } from "lucide-react";
 import { formatDate, formatTime } from "@/lib/utils/format";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -20,6 +21,7 @@ type AuditRecord = {
 };
 
 export default function AdminAuditPage() {
+  const { t, isClient } = useTranslation();
   const [logs, setLogs] = useState<AuditRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -48,22 +50,22 @@ export default function AdminAuditPage() {
     return reviewerName.includes(search) || studentName.includes(search) || action.includes(search);
   });
 
-  if (loading) return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
+  if (!isClient || loading) return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
 
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold flex items-center gap-2">
-            <FileText className="h-5 w-5" /> Audit Log
+            <FileText className="h-5 w-5" /> {t.adminAudit.title}
           </h1>
-          <p className="text-muted-foreground text-sm mt-1">System-wide verification activity trail</p>
+          <p className="text-muted-foreground text-sm mt-1">{t.adminAudit.subtitle}</p>
         </div>
         <div className="relative max-w-sm w-full">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
           <input 
             type="text" 
-            placeholder="Search logs..." 
+            placeholder={t.adminAudit.searchPlaceholder} 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-4 py-2 rounded-xl bg-card border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" 
@@ -76,19 +78,19 @@ export default function AdminAuditPage() {
           <table className="w-full text-sm text-left">
             <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
               <tr>
-                <th className="px-6 py-4 font-semibold">Timestamp</th>
-                <th className="px-6 py-4 font-semibold">Reviewer</th>
-                <th className="px-6 py-4 font-semibold">Action</th>
-                <th className="px-6 py-4 font-semibold">Target Student</th>
-                <th className="px-6 py-4 font-semibold">Target Date</th>
-                <th className="px-6 py-4 font-semibold">Notes</th>
+                <th className="px-6 py-4 font-semibold">{t.adminAudit.thTimestamp}</th>
+                <th className="px-6 py-4 font-semibold">{t.adminAudit.thReviewer}</th>
+                <th className="px-6 py-4 font-semibold">{t.adminAudit.thAction}</th>
+                <th className="px-6 py-4 font-semibold">{t.adminAudit.thTargetStudent}</th>
+                <th className="px-6 py-4 font-semibold">{t.adminAudit.thTargetDate}</th>
+                <th className="px-6 py-4 font-semibold">{t.adminAudit.thNotes}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
               {filteredLogs.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-6 py-10">
-                    <EmptyState icon={FileText} title="No audit logs found" description="Try adjusting your search filter." />
+                    <EmptyState icon={FileText} title={t.adminAudit.noLogs} description={t.adminAudit.adjustSearch} />
                   </td>
                 </tr>
               ) : (
@@ -106,7 +108,7 @@ export default function AdminAuditPage() {
                       <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
                         log.action === 'approved' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'
                       }`}>
-                        {log.action}
+                        {log.action === 'approved' ? t.adminReports.approved : t.adminReports.rejected}
                       </span>
                     </td>
                     <td className="px-6 py-4 font-medium">

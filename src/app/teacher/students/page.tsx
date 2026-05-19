@@ -155,7 +155,7 @@ export default function TeacherStudentsPage() {
                 
                 <div className="space-y-2.5">
                   <div className="flex items-center justify-between text-xs font-semibold">
-                    <span className="text-muted-foreground">{t.teacher.myClasses.replace("Saya", "").trim() || "Class"}</span>
+                    <span className="text-muted-foreground">{t.teacher.classLabel}</span>
                     <span className="bg-muted px-2.5 py-1 rounded-lg text-foreground font-bold">{student.class_name}</span>
                   </div>
                   <div className="flex items-center justify-between text-xs font-semibold">

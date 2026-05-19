@@ -22,7 +22,7 @@ export default function CheckInPage() {
   const { profile } = useUserRole();
   const { t, interpolate, isClient } = useTranslation();
   const { position, error: geoError, loading: geoLoading, requestPosition } = useGeolocation();
-  const { videoRef, preview, blob, active, error: camError, open, capture, retake, close } = useCamera();
+  const { videoRef, preview, blob, active, initializing, error: camError, open, capture, retake, close } = useCamera();
   const router = useRouter();
 
   const [school, setSchool] = useState<{ latitude: number; longitude: number; radius_m: number } | null>(null);
@@ -290,19 +290,25 @@ export default function CheckInPage() {
         </div>
         <div className="p-5 space-y-4">
           {camError ? (
-            <AlertBanner variant="error" title="Camera Error" description={t.checkin.selfie.permissionDenied} action={<button onClick={open} className="text-sm font-medium underline text-destructive">Try Again</button>} />
+            <AlertBanner variant="error" title="Camera Error" description={camError} action={<button onClick={open} className="text-sm font-medium underline text-destructive">Try Again</button>} />
           ) : (
             <div className="relative rounded-xl overflow-hidden bg-black aspect-[4/3] shadow-inner">
-              {!preview && !active ? (
+              <video ref={videoRef} autoPlay playsInline muted className={`absolute inset-0 w-full h-full object-cover ${(!active || preview) ? "hidden" : ""}`} style={{ transform: "scaleX(-1)" }} />
+              {preview && <img src={preview} alt="Selfie preview" className="absolute inset-0 w-full h-full object-cover" style={{ transform: "scaleX(-1)" }} />}
+              {!preview && !active && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-white/50">
-                  <Camera className="h-10 w-10 mb-3 opacity-50" />
-                  <p className="text-sm">{t.checkin.selfie.required}</p>
+                  {initializing ? (
+                    <>
+                      <RefreshCw className="h-10 w-10 mb-3 opacity-50 animate-spin" />
+                      <p className="text-sm">Requesting camera permission...</p>
+                    </>
+                  ) : (
+                    <>
+                      <Camera className="h-10 w-10 mb-3 opacity-50" />
+                      <p className="text-sm">Camera not started yet</p>
+                    </>
+                  )}
                 </div>
-              ) : (
-                <>
-                  <video ref={videoRef} autoPlay playsInline muted className={`w-full h-full object-cover ${preview ? "hidden" : ""}`} style={{ transform: "scaleX(-1)" }} />
-                  {preview && <img src={preview} alt="Selfie preview" className="w-full h-full object-cover" style={{ transform: "scaleX(-1)" }} />}
-                </>
               )}
             </div>
           )}
@@ -315,7 +321,7 @@ export default function CheckInPage() {
                  <StatefulButton label={t.checkin.selfie.retake} variant="secondary" onClick={retake} />
                </>
              ) : !camError ? (
-               <StatefulButton label="Open Camera" icon={Camera} onClick={open} />
+               <StatefulButton label={initializing ? "Requesting..." : "Open Camera"} state={initializing ? "loading" : "idle"} icon={Camera} onClick={open} />
              ) : null}
           </div>
         </div>

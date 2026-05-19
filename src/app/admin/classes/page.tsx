@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useTranslation } from "@/lib/i18n/use-translation";
 import { Library, Users, User, Plus, Loader2, BookOpen } from "lucide-react";
 import { EmptyState } from "@/components/shared/empty-state";
 import type { Class } from "@/lib/types/database";
@@ -12,6 +13,7 @@ type ClassData = Class & {
 };
 
 export default function AdminClassesPage() {
+  const { t, interpolate, isClient } = useTranslation();
   const [classes, setClasses] = useState<ClassData[]>([]);
   const [teachers, setTeachers] = useState<{id: string, full_name: string}[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,7 +53,7 @@ export default function AdminClassesPage() {
   const handleAddClass = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name || !formData.teacher_id) {
-      setErrorMsg("Please fill all fields");
+      setErrorMsg(t.adminClasses.fillFields);
       return;
     }
     
@@ -77,33 +79,33 @@ export default function AdminClassesPage() {
         setFormData({ name: "", teacher_id: "" });
       }
     } else {
-      setErrorMsg("System error: School not found");
+      setErrorMsg(t.adminClasses.schoolNotFound);
     }
     
     setSaving(false);
   };
 
-  if (loading) return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
+  if (!isClient || loading) return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
 
   return (
     <div className="space-y-6 animate-fade-in relative">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold flex items-center gap-2">
-            <Library className="h-5 w-5 text-indigo-500" /> Class Management
+            <Library className="h-5 w-5 text-indigo-500" /> {t.adminClasses.title}
           </h1>
-          <p className="text-muted-foreground text-sm mt-1">{classes.length} active classes</p>
+          <p className="text-muted-foreground text-sm mt-1">{interpolate(t.adminClasses.activeClasses, { count: classes.length })}</p>
         </div>
         <button 
           onClick={() => setShowModal(true)}
           className="flex items-center gap-2 bg-indigo-500 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-indigo-600 transition-colors"
         >
-          <Plus className="h-4 w-4" /> Add Class
+          <Plus className="h-4 w-4" /> {t.adminClasses.addClass}
         </button>
       </div>
 
       {classes.length === 0 ? (
-        <EmptyState icon={Library} title="No classes found" description="Create your first class to start tracking attendance." />
+        <EmptyState icon={Library} title={t.adminClasses.noClasses} description={t.adminClasses.noClassesDesc} />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {classes.map((cls) => (
@@ -114,7 +116,7 @@ export default function AdminClassesPage() {
                     <BookOpen className="h-5 w-5" />
                   </div>
                   <span className="bg-muted px-2.5 py-1 rounded-full text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
-                    <Users className="h-3 w-3" /> {cls.enrollments[0]?.count || 0} students
+                    <Users className="h-3 w-3" /> {interpolate(t.adminClasses.studentsCount, { count: cls.enrollments[0]?.count || 0 })}
                   </span>
                 </div>
                 <h3 className="font-bold text-lg">{cls.name}</h3>
@@ -122,7 +124,7 @@ export default function AdminClassesPage() {
               
               <div className="mt-4 pt-4 border-t border-border flex items-center gap-2 text-sm text-muted-foreground">
                 <User className="h-4 w-4 shrink-0" />
-                <span className="truncate">{cls.teacher?.full_name || "Unassigned"}</span>
+                <span className="truncate">{cls.teacher?.full_name || t.adminClasses.unassigned}</span>
               </div>
             </div>
           ))}
@@ -134,13 +136,13 @@ export default function AdminClassesPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
           <div className="bg-card border border-border w-full max-w-md rounded-2xl shadow-xl overflow-hidden animate-fade-in">
             <div className="px-6 py-4 border-b border-border flex justify-between items-center bg-muted/50">
-              <h2 className="font-bold text-lg">Create New Class</h2>
+              <h2 className="font-bold text-lg">{t.adminClasses.createNewClass}</h2>
               <button onClick={() => setShowModal(false)} className="text-muted-foreground hover:text-foreground">✕</button>
             </div>
             
             <form onSubmit={handleAddClass} className="p-6 space-y-4">
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Class Name</label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">{t.adminClasses.className}</label>
                 <input 
                   required
                   type="text" 
@@ -152,14 +154,14 @@ export default function AdminClassesPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Assign Teacher</label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">{t.adminClasses.assignTeacher}</label>
                 <select 
                   required
                   value={formData.teacher_id}
                   onChange={(e) => setFormData({...formData, teacher_id: e.target.value})}
                   className="w-full px-3 py-2 rounded-xl bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500/50 appearance-none" 
                 >
-                  <option value="" disabled>Select a teacher...</option>
+                  <option value="" disabled>{t.adminClasses.selectTeacher}</option>
                   {teachers.map(t => (
                     <option key={t.id} value={t.id}>{t.full_name}</option>
                   ))}
@@ -175,7 +177,7 @@ export default function AdminClassesPage() {
                   className="w-full py-2.5 rounded-xl bg-indigo-500 text-white font-semibold text-sm disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                  {saving ? "Creating..." : "Create Class"}
+                  {saving ? t.adminClasses.creating : t.adminClasses.createClass}
                 </button>
               </div>
             </form>

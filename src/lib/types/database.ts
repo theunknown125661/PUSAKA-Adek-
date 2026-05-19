@@ -16,6 +16,11 @@ export type TransactionType =
   | "hold_lock"
   | "hold_release";
 
+export type AvatarMode = "upload" | "builder" | "initials";
+export type ProfileStatus = "active" | "moderated" | "hidden";
+export type CosmeticType = "frame" | "theme" | "title" | "sticker";
+export type CosmeticRarity = "common" | "rare" | "epic";
+
 export interface Profile {
   id: string;
   role: UserRole;
@@ -23,6 +28,54 @@ export interface Profile {
   email: string;
   avatar_url: string | null;
   school_id: string | null;
+  // New profile fields
+  username: string | null;
+  bio: string | null;
+  avatar_mode: AvatarMode;
+  theme_id: string | null;
+  title_id: string | null;
+  frame_id: string | null;
+  sticker_id: string | null;
+  profile_status: ProfileStatus;
+  created_at: string;
+  updated_at: string | null;
+  xp: number;
+  level: number;
+  coins: number;
+  streak_current?: number;
+}
+
+export interface Cosmetic {
+  id: string;
+  type: CosmeticType;
+  name: string;
+  description: string | null;
+  asset_url: string | null;
+  css_value: string | null;
+  rarity: CosmeticRarity;
+  unlock_type: string;
+  unlock_rule: Record<string, any> | null;
+  active: boolean;
+  created_at: string;
+}
+
+export interface UserCosmetic {
+  id: string;
+  user_id: string;
+  cosmetic_id: string;
+  unlocked_at: string;
+  equipped: boolean;
+  cosmetics?: Cosmetic;
+}
+
+export interface ProfileModerationLog {
+  id: string;
+  user_id: string;
+  target_type: string;
+  action: string;
+  reason: string | null;
+  note: string | null;
+  moderated_by: string;
   created_at: string;
 }
 
@@ -189,4 +242,105 @@ export interface AdminDashboardStats {
   rejectedToday: number;
   pendingWithdrawals: number;
   totalHeldBalance: number;
+}
+
+export interface Streak {
+  id: string;
+  student_id: string;
+  current_streak: number;
+  longest_streak: number;
+  last_attendance_date: string | null;
+  shield_count: number;
+  shield_used_dates: string[];
+  updated_at: string;
+}
+
+export type HolidayType = 'national' | 'school' | 'exam';
+
+export interface HolidayCalendar {
+  id: string;
+  school_id: string;
+  date: string;
+  name: string;
+  type: HolidayType;
+  created_by?: string;
+  created_at: string;
+}
+
+export interface CoinTransaction {
+  id: string;
+  user_id: string;
+  amount: number;
+  type: 'attendance' | 'early_bonus' | 'streak_milestone' | 'quest' | 'purchase' | 'badge_unlock';
+  reference_id?: string | null;
+  description: string;
+  created_at: string;
+}
+
+export interface ShopItem {
+  id: string;
+  cosmetic_id?: string | null;
+  name: string;
+  description?: string;
+  category: 'theme' | 'frame' | 'title' | 'sticker' | 'booster' | 'shield' | 'mascot' | 'decor' | 'seasonal';
+  price_rp: number;
+  price_coins?: number;
+  stock?: number | null;
+  featured: boolean;
+  available_from?: string | null;
+  available_until?: string | null;
+  active: boolean;
+  created_at: string;
+}
+
+export interface Purchase {
+  id: string;
+  user_id: string;
+  shop_item_id: string;
+  price_paid: number;
+  currency: 'rp' | 'coins';
+  purchased_at: string;
+}
+
+export interface Badge {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  rarity: 'common' | 'rare' | 'epic' | 'legendary';
+  family: string;
+  unlock_rule: Record<string, any>;
+  active: boolean;
+  created_at: string;
+}
+
+export interface UserBadge {
+  id: string;
+  user_id: string;
+  badge_id: string;
+  unlocked_at: string;
+  is_new: boolean;
+}
+
+export interface Quest {
+  id: string;
+  title: string;
+  description: string;
+  type: 'daily' | 'weekly' | 'special';
+  reward_xp: number;
+  reward_coins: number;
+  requirement_type: 'checkin_count' | 'early_bird_count' | 'streak_reach';
+  requirement_value: number;
+  active: boolean;
+  created_at: string;
+}
+
+export interface UserQuest {
+  id: string;
+  user_id: string;
+  quest_id: string;
+  status: 'in_progress' | 'completed';
+  progress: number;
+  completed_at?: string | null;
+  created_at: string;
 }

@@ -139,7 +139,7 @@ export default function ClassDetailPage() {
                 <div>
                   <p className="font-bold text-base">{(log.profiles as unknown as { full_name: string })?.full_name || "Student"}</p>
                   <p className="text-xs text-muted-foreground font-medium mt-0.5">
-                    {formatTime(log.submitted_at)} • {formatDistance(log.distance_m)} • Accuracy: {formatAccuracy(log.accuracy_m)}
+                    {formatTime(log.submitted_at)} • {formatDistance(log.distance_m)} • {t.teacher.accuracy}: {formatAccuracy(log.accuracy_m)}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -180,7 +180,7 @@ export default function ClassDetailPage() {
                       {log.fraud_flags.map((f) => (
                         <span key={f} className="px-2 py-0.5 rounded bg-orange-500/10 text-orange-500 font-semibold text-[10px] uppercase tracking-wider flex items-center gap-1">
                           <AlertTriangle className="h-3 w-3" />
-                          {flagLabel(f as Parameters<typeof flagLabel>[0])}
+                          {t.fraud[f as keyof typeof t.fraud] || f}
                         </span>
                       ))}
                     </div>

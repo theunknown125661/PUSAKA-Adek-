@@ -166,7 +166,7 @@ export default function AdminDashboard() {
                       <span className={activity.action === 'approved' ? 'text-success font-bold' : 'text-destructive font-bold'}>
                         {activity.action === 'approved' ? t.admin.approvedAction : t.admin.rejectedAction}
                       </span>{" "}
-                      attendance for <span className="font-bold">{(activity.attendance_logs?.profiles as unknown as { full_name: string })?.full_name}</span>
+                      {t.admin.attendanceFor} <span className="font-bold">{(activity.attendance_logs?.profiles as unknown as { full_name: string })?.full_name}</span>
                     </p>
                     <div className="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-muted-foreground font-semibold">
                       <span>
@@ -174,7 +174,7 @@ export default function AdminDashboard() {
                       </span>
                       {activity.note && (
                         <span className="text-xs font-semibold text-muted-foreground bg-muted px-2.5 py-0.5 rounded-full max-w-[280px] truncate">
-                          Note: {activity.note}
+                          {t.admin.noteLabel} {activity.note}
                         </span>
                       )}
                     </div>

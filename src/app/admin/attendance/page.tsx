@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useTranslation } from "@/lib/i18n/use-translation";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatDate, formatTime, formatDistance, formatAccuracy } from "@/lib/utils/format";
@@ -10,6 +11,7 @@ import { ClipboardCheck, CheckCircle, XCircle, Loader2 } from "lucide-react";
 import type { AttendanceLog } from "@/lib/types/database";
 
 export default function AttendanceReviewPage() {
+  const { t, interpolate, isClient } = useTranslation();
   const [logs, setLogs] = useState<AttendanceLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [noteMap, setNoteMap] = useState<Record<string, string>>({});
@@ -74,19 +76,22 @@ export default function AttendanceReviewPage() {
       }
 
       setLogs((prev) => prev.filter((l) => l.id !== logId));
-      setSuccessMsg(`Attendance ${action} successfully.`);
+      setSuccessMsg(interpolate(t.adminAttendance.successMessage, { action: action === 'approved' ? t.admin.approvedAction : t.admin.rejectedAction }));
     } catch (err: any) {
-      setErrorMsg(`Failed to process attendance: ${err.message || "Unknown error"}`);
+      setErrorMsg(interpolate(t.adminAttendance.errorMessage, { message: err.message || "Unknown error" }));
     } finally {
       setProcessingId(null);
     }
   };
 
-  if (loading) return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
+  if (!isClient || loading) return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div><h1 className="text-xl font-bold flex items-center gap-2"><ClipboardCheck className="h-5 w-5" /> Attendance Review</h1><p className="text-muted-foreground text-sm mt-1">{logs.length} pending submissions</p></div>
+      <div>
+        <h1 className="text-xl font-bold flex items-center gap-2"><ClipboardCheck className="h-5 w-5" /> {t.adminAttendance.title}</h1>
+        <p className="text-muted-foreground text-sm mt-1">{interpolate(t.adminAttendance.pendingSubmissions, { count: logs.length })}</p>
+      </div>
 
       {errorMsg && (
         <div className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-3 flex items-center gap-2">
@@ -101,7 +106,7 @@ export default function AttendanceReviewPage() {
       )}
 
       {logs.length === 0 ? (
-        <EmptyState icon={ClipboardCheck} title="All caught up!" description="No pending attendance submissions to review." />
+        <EmptyState icon={ClipboardCheck} title={t.adminAttendance.allCaughtUp} description={t.adminAttendance.noSubmissions} />
       ) : (
         <div className="space-y-4">
           {logs.map((log) => (
@@ -121,24 +126,52 @@ export default function AttendanceReviewPage() {
                 {log.proof_image_url && <img src={log.proof_image_url} alt="Selfie" className="w-24 h-24 rounded-lg object-cover flex-shrink-0" />}
                 <div className="flex-1 space-y-2">
                   <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="bg-muted rounded-lg p-2"><span className="text-muted-foreground">Distance:</span> <span className="font-medium">{formatDistance(log.distance_m)}</span></div>
-                    <div className="bg-muted rounded-lg p-2"><span className="text-muted-foreground">Accuracy:</span> <span className="font-medium">{formatAccuracy(log.accuracy_m)}</span></div>
-                    <div className="bg-muted rounded-lg p-2"><span className="text-muted-foreground">In Radius:</span> <span className={`font-medium ${log.within_radius ? "text-emerald-500" : "text-red-400"}`}>{log.within_radius ? "Yes" : "No"}</span></div>
-                    <div className="bg-muted rounded-lg p-2"><span className="text-muted-foreground">On Time:</span> <span className={`font-medium ${log.within_time_window ? "text-emerald-500" : "text-red-400"}`}>{log.within_time_window ? "Yes" : "No"}</span></div>
+                    <div className="bg-muted rounded-lg p-2"><span className="text-muted-foreground">{t.adminAttendance.distance}:</span> <span className="font-medium">{formatDistance(log.distance_m)}</span></div>
+                    <div className="bg-muted rounded-lg p-2"><span className="text-muted-foreground">{t.adminAttendance.accuracy}:</span> <span className="font-medium">{formatAccuracy(log.accuracy_m)}</span></div>
+                    <div className="bg-muted rounded-lg p-2"><span className="text-muted-foreground">{t.adminAttendance.inRadius}:</span> <span className={`font-medium ${log.within_radius ? "text-emerald-500" : "text-red-400"}`}>{log.within_radius ? t.adminAttendance.yes : t.adminAttendance.no}</span></div>
+                    <div className="bg-muted rounded-lg p-2"><span className="text-muted-foreground">{t.adminAttendance.onTime}:</span> <span className={`font-medium ${log.within_time_window ? "text-emerald-500" : "text-red-400"}`}>{log.within_time_window ? t.adminAttendance.yes : t.adminAttendance.no}</span></div>
                   </div>
-                  {log.before_early_cutoff && <span className="text-xs text-amber-500">🌅 Early Bird</span>}
+                  {log.before_early_cutoff && <span className="text-xs text-amber-500">🌅 {t.adminAttendance.earlyBird}</span>}
                   {log.fraud_flags && log.fraud_flags.length > 0 && (
-                    <div className="flex flex-wrap gap-1">{log.fraud_flags.map((f) => <span key={f} className="px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-500 text-[10px]">{flagLabel(f as FraudFlag)}</span>)}</div>
+                    <div className="flex flex-wrap gap-1">
+                      {log.fraud_flags.map((f) => (
+                        <span key={f} className="px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-500 text-[10px]">
+                          {t.fraud[f as keyof typeof t.fraud] || f}
+                        </span>
+                      ))}
+                    </div>
                   )}
                 </div>
               </div>
 
-              {log.teacher_note_summary && <div className="bg-blue-500/10 rounded-lg p-2.5 text-xs border border-blue-500/20"><span className="font-medium text-blue-400">Teacher note: </span>{log.teacher_note_summary}</div>}
+              {log.teacher_note_summary && (
+                <div className="bg-blue-500/10 rounded-lg p-2.5 text-xs border border-blue-500/20">
+                  <span className="font-medium text-blue-400">{t.adminAttendance.teacherNote}: </span>
+                  {log.teacher_note_summary}
+                </div>
+              )}
 
               <div className="flex gap-2 items-end">
-                <input value={noteMap[log.id] || ""} onChange={(e) => setNoteMap((prev) => ({ ...prev, [log.id]: e.target.value }))} placeholder="Admin note (optional)" className="flex-1 px-3 py-2 rounded-lg bg-muted border border-border text-xs focus:outline-none focus:ring-1 focus:ring-primary/50" />
-                <button onClick={() => handleAction(log.id, "approved")} disabled={processingId === log.id} className="px-4 py-2 rounded-lg bg-emerald-500 text-white text-xs font-medium flex items-center gap-1.5 hover:bg-emerald-600 disabled:opacity-50">{processingId === log.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />} Approve</button>
-                <button onClick={() => handleAction(log.id, "rejected")} disabled={processingId === log.id} className="px-4 py-2 rounded-lg bg-red-500 text-white text-xs font-medium flex items-center gap-1.5 hover:bg-red-600 disabled:opacity-50"><XCircle className="h-3.5 w-3.5" /> Reject</button>
+                <input 
+                  value={noteMap[log.id] || ""} 
+                  onChange={(e) => setNoteMap((prev) => ({ ...prev, [log.id]: e.target.value }))} 
+                  placeholder={t.adminAttendance.adminNotePlaceholder} 
+                  className="flex-1 px-3 py-2 rounded-lg bg-muted border border-border text-xs focus:outline-none focus:ring-1 focus:ring-primary/50" 
+                />
+                <button 
+                  onClick={() => handleAction(log.id, "approved")} 
+                  disabled={processingId === log.id} 
+                  className="px-4 py-2 rounded-lg bg-emerald-500 text-white text-xs font-medium flex items-center gap-1.5 hover:bg-emerald-600 disabled:opacity-50"
+                >
+                  {processingId === log.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />} {t.adminAttendance.approve}
+                </button>
+                <button 
+                  onClick={() => handleAction(log.id, "rejected")} 
+                  disabled={processingId === log.id} 
+                  className="px-4 py-2 rounded-lg bg-red-500 text-white text-xs font-medium flex items-center gap-1.5 hover:bg-red-600 disabled:opacity-50"
+                >
+                  <XCircle className="h-3.5 w-3.5" /> {t.adminAttendance.reject}
+                </button>
               </div>
             </div>
           ))}

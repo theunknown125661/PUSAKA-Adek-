@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useUserRole } from "@/lib/hooks/use-user-role";
+import { useTranslation } from "@/lib/i18n/use-translation";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatDate, formatTime, formatDistance } from "@/lib/utils/format";
@@ -11,6 +12,7 @@ import type { AttendanceLog } from "@/lib/types/database";
 
 export default function AttendanceHistoryPage() {
   const { profile } = useUserRole();
+  const { t, isClient } = useTranslation();
   const [logs, setLogs] = useState<AttendanceLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
@@ -28,18 +30,18 @@ export default function AttendanceHistoryPage() {
     load();
   }, [profile, filter]);
 
-  if (loading) return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
+  if (!isClient || loading) return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
 
   const filters = [
-    { value: "all", label: "All" },
-    { value: "pending_teacher_view", label: "Pending" },
-    { value: "approved", label: "Approved" },
-    { value: "rejected", label: "Rejected" },
+    { value: "all", label: t.history.filters.all },
+    { value: "pending_teacher_view", label: t.history.filters.pending },
+    { value: "approved", label: t.history.filters.approved },
+    { value: "rejected", label: t.history.filters.rejected },
   ];
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div><h1 className="text-xl font-bold flex items-center gap-2"><History className="h-5 w-5" /> Attendance History</h1></div>
+      <div><h1 className="text-xl font-bold flex items-center gap-2"><History className="h-5 w-5" /> {t.history.title}</h1></div>
 
       <div className="flex gap-2 overflow-x-auto pb-1">
         {filters.map((f) => (
@@ -48,7 +50,7 @@ export default function AttendanceHistoryPage() {
       </div>
 
       {logs.length === 0 ? (
-        <EmptyState icon={Calendar} title="No records found" description="Your attendance records will appear here." />
+        <EmptyState icon={Calendar} title={t.history.empty} description={t.history.emptyDesc} />
       ) : (
         <div className="space-y-3">
           {logs.map((log) => (
@@ -56,26 +58,26 @@ export default function AttendanceHistoryPage() {
               <div className="flex items-start justify-between">
                 <div>
                   <p className="font-medium text-sm">{formatDate(log.attendance_date)}</p>
-                  <p className="text-xs text-muted-foreground">Submitted {formatTime(log.submitted_at)}</p>
+                  <p className="text-xs text-muted-foreground">{t.history.submitted} {formatTime(log.submitted_at)}</p>
                 </div>
                 <StatusBadge status={log.status} />
               </div>
               <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                <span>{formatDistance(log.distance_m)} from school</span>
-                <span className={log.within_radius ? "text-emerald-500" : "text-amber-500"}>{log.within_radius ? "In radius" : "Out of radius"}</span>
-                {log.before_early_cutoff && <span className="text-amber-500">🌅 Early</span>}
+                <span>{formatDistance(log.distance_m)} {t.history.fromSchool}</span>
+                <span className={log.within_radius ? "text-emerald-500" : "text-amber-500"}>{log.within_radius ? t.history.inRadius : t.history.outRadius}</span>
+                {log.before_early_cutoff && <span className="text-amber-500">🌅 {t.history.early}</span>}
               </div>
               {log.proof_image_url && (
                 <img src={log.proof_image_url} alt="Selfie proof" className="w-16 h-16 rounded-lg object-cover" />
               )}
               {log.admin_note && (
                 <div className="bg-muted rounded-lg p-2.5 text-xs">
-                  <span className="font-medium">Admin note: </span>{log.admin_note}
+                  <span className="font-medium">{t.history.adminNote} </span>{log.admin_note}
                 </div>
               )}
               {log.teacher_note_summary && (
                 <div className="bg-muted rounded-lg p-2.5 text-xs">
-                  <span className="font-medium">Teacher note: </span>{log.teacher_note_summary}
+                  <span className="font-medium">{t.history.teacherNote} </span>{log.teacher_note_summary}
                 </div>
               )}
             </div>

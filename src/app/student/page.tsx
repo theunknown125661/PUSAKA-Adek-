@@ -25,17 +25,23 @@ export default function StudentDashboard() {
     const today = new Date().toISOString().split("T")[0];
 
     async function load() {
-      const [attRes, walRes, badgeRes, appRes] = await Promise.all([
+      const [attRes, walRes, badgeRes, appRes, streakRes] = await Promise.all([
         supabase.from("attendance_logs").select("*").eq("student_id", profile!.id).eq("attendance_date", today).limit(1),
         supabase.from("wallets").select("*").eq("student_id", profile!.id).single(),
         supabase.from("student_badges").select("*, badges(*)").eq("student_id", profile!.id),
         supabase.from("attendance_logs").select("id", { count: "exact" }).eq("student_id", profile!.id).eq("status", "approved"),
+        supabase.from("streaks").select("*").eq("student_id", profile!.id).single(),
       ]);
       if (attRes.data?.[0]) setTodayAttendance(attRes.data[0]);
       if (walRes.data) setWallet(walRes.data);
       if (badgeRes.data) setBadges(badgeRes.data as unknown as StudentBadge[]);
       setTotalApproved(appRes.count || 0);
-      setStreak({ current: Math.min(appRes.count || 0, 7), longest: appRes.count || 0 }); // Mock streak logic for now
+      
+      if (streakRes.data) {
+        setStreak({ current: streakRes.data.current_streak, longest: streakRes.data.longest_streak });
+      } else {
+        setStreak({ current: 0, longest: 0 }); 
+      }
       setLoading(false);
     }
     load();
@@ -67,7 +73,7 @@ export default function StudentDashboard() {
               </div>
             </div>
             <div className="mt-6 flex items-center gap-2 text-sm font-semibold text-white/90 bg-black/10 w-fit px-4 py-2 rounded-full backdrop-blur-md">
-              Check in <ChevronRight className="h-4 w-4" />
+              {t.navigation.checkIn} <ChevronRight className="h-4 w-4" />
             </div>
           </div>
         </Link>
@@ -130,9 +136,26 @@ export default function StudentDashboard() {
   return (
     <div className="space-y-6 animate-fade-in pb-12">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold">{greet}, {profile?.full_name?.split(" ")[0]} 👋</h1>
-        <p className="text-muted-foreground text-sm mt-1">{t.dashboard.overview}</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            {greet}, {profile?.full_name?.split(" ")[0]} 👋
+            <span className="text-xs bg-primary/10 text-primary font-bold px-2 py-1 rounded-full uppercase tracking-wider border border-primary/20">
+              Lvl {profile?.level || 1}
+            </span>
+          </h1>
+          <p className="text-muted-foreground text-sm mt-1">{t.dashboard.overview}</p>
+        </div>
+        <div className="text-right">
+          <div className="flex items-center gap-1.5 justify-end mb-1">
+            <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">XP</span>
+            <span className="text-sm font-bold">{profile?.xp || 0}</span>
+          </div>
+          <div className="flex items-center gap-1.5 bg-amber-500/10 text-amber-600 dark:text-amber-500 px-3 py-1 rounded-full border border-amber-500/20 shadow-sm">
+            <div className="h-4 w-4 rounded-full bg-gradient-to-br from-amber-300 to-amber-500 flex items-center justify-center text-[10px] text-white font-bold">$</div>
+            <span className="text-sm font-bold">{profile?.coins || 0} Coins</span>
+          </div>
+        </div>
       </div>
 
       {/* Hero Action Card */}

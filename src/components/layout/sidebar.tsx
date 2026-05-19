@@ -1,13 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import type { UserRole } from "@/lib/types/database";
+import type { UserRole, Profile } from "@/lib/types/database";
+import AvatarDisplay from "@/components/profile/avatar-display";
+import { useTheme } from "next-themes";
+import { useTranslation } from "@/lib/i18n/use-translation";
 import {
-  LayoutDashboard, MapPin, History, Wallet, Users,
+  LayoutDashboard, MapPin, History, Wallet, Users, User, Coins, Flame,
   ClipboardCheck, Settings, BookOpen, Shield, LogOut, GraduationCap,
-  AlertTriangle, Gift, Library, BarChart3
+  AlertTriangle, Gift, Library, BarChart3, ChevronUp, Sun, Moon, Globe, Calendar as CalendarIcon, Store, Medal, ClipboardList
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
@@ -15,68 +19,82 @@ import { useRouter } from "next/navigation";
 type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string }> };
 type NavSection = { title?: string; items: NavItem[] };
 
-const navConfig: Record<UserRole, NavSection[]> = {
+const getNavConfig = (t: any): Record<UserRole, NavSection[]> => ({
   student: [
     {
       items: [
-        { href: "/student", label: "Dashboard", icon: LayoutDashboard },
-        { href: "/student/check-in", label: "Check In", icon: MapPin },
-        { href: "/student/history", label: "History", icon: History },
-        { href: "/student/wallet", label: "Wallet", icon: Wallet },
-        { href: "/student/settings", label: "Settings", icon: Settings },
+        { href: "/student", label: t.navigation.dashboard, icon: LayoutDashboard },
+        { href: "/student/check-in", label: t.navigation.checkIn, icon: MapPin },
+        { href: "/student/shop", label: t.navigation.rewardShop, icon: Store },
+        { href: "/student/badges", label: t.navigation.badges, icon: Medal },
+        { href: "/student/quests", label: t.navigation.quests, icon: ClipboardList },
+        { href: "/student/history", label: t.navigation.history, icon: History },
+        { href: "/student/wallet", label: t.navigation.wallet, icon: Wallet },
+        { href: "/student/profile", label: t.navigation.profile, icon: User },
       ]
     }
   ],
   teacher: [
     {
       items: [
-        { href: "/teacher", label: "Dashboard", icon: LayoutDashboard },
-        { href: "/teacher/classes", label: "My Classes", icon: BookOpen },
-        { href: "/teacher/students", label: "Students", icon: Users },
+        { href: "/teacher", label: t.navigation.dashboard, icon: LayoutDashboard },
+        { href: "/teacher/classes", label: t.navigation.myClasses, icon: BookOpen },
+        { href: "/teacher/students", label: t.navigation.students, icon: Users },
       ]
     }
   ],
   admin: [
     {
-      title: "Overview",
+      title: t.navigation.sections.overview,
       items: [
-        { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
+        { href: "/admin", label: t.navigation.dashboard, icon: LayoutDashboard },
       ]
     },
     {
-      title: "Verification",
+      title: t.navigation.sections.verification,
       items: [
-        { href: "/admin/attendance", label: "Reviews", icon: ClipboardCheck },
-        { href: "/admin/flagged", label: "Flagged", icon: AlertTriangle },
+        { href: "/admin/attendance", label: t.navigation.reviews, icon: ClipboardCheck },
+        { href: "/admin/flagged", label: t.navigation.flagged, icon: AlertTriangle },
+        { href: "/admin/attendance/calendar", label: t.navigation.calendar, icon: CalendarIcon },
       ]
     },
     {
-      title: "Financial",
+      title: t.navigation.sections.financial,
       items: [
-        { href: "/admin/withdrawals", label: "Payouts", icon: Wallet },
-        { href: "/admin/rewards", label: "Rewards", icon: Gift },
+        { href: "/admin/withdrawals", label: t.navigation.payouts, icon: Wallet },
+        { href: "/admin/rewards", label: t.navigation.rewards, icon: Gift },
       ]
     },
     {
-      title: "Management",
+      title: t.navigation.sections.management,
       items: [
-        { href: "/admin/users", label: "Users", icon: Users },
-        { href: "/admin/classes", label: "Classes", icon: Library },
+        { href: "/admin/users", label: t.navigation.users, icon: Users },
+        { href: "/admin/classes", label: t.navigation.classes, icon: Library },
+        { href: "/admin/holidays", label: t.navigation.holidays, icon: CalendarIcon },
+        { href: "/admin/shop", label: t.navigation.shopItems, icon: Store },
+        { href: "/admin/badges", label: t.navigation.badges, icon: Medal },
+        { href: "/admin/quests", label: t.navigation.quests, icon: ClipboardList },
       ]
     },
     {
-      title: "System",
+      title: t.navigation.sections.system,
       items: [
-        { href: "/admin/reports", label: "Reports", icon: BarChart3 },
-        { href: "/admin/settings", label: "Settings", icon: Settings },
+        { href: "/admin/reports", label: t.navigation.reports, icon: BarChart3 },
+        { href: "/admin/settings", label: t.navigation.settings, icon: Settings },
       ]
     }
   ],
-};
+});
 
-export function Sidebar({ role, userName }: { role: UserRole; userName: string }) {
+export function Sidebar({ role, profile }: { role: UserRole; profile: Profile }) {
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showHoverProfile, setShowHoverProfile] = useState(false);
+  const { theme, setTheme } = useTheme();
+  const { t, locale } = useTranslation();
   const pathname = usePathname();
   const router = useRouter();
+  
+  const navConfig = getNavConfig(t);
   const sections = navConfig[role] || [];
   
   // Flatten items for mobile bottom nav so we don't have sections there
@@ -141,22 +159,131 @@ export function Sidebar({ role, userName }: { role: UserRole; userName: string }
           ))}
         </nav>
 
-        <div className="p-3 border-t border-border bg-card/50">
-          <div className="flex items-center gap-3 px-3 py-2 mb-2">
-            <div className="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
-              <RoleIcon className="h-4 w-4 text-primary" />
+        <div className="p-3 border-t border-border bg-card relative">
+          {/* Profile Popover */}
+          {showProfileMenu && (
+            <div className="absolute bottom-full left-3 right-3 mb-2 p-4 bg-card border border-border shadow-lg rounded-xl animate-in slide-in-from-bottom-2 fade-in duration-200 z-50">
+              {/* Header */}
+              <div className="flex items-center gap-3 mb-3">
+                <AvatarDisplay
+                  fullName={profile.full_name || "User"}
+                  avatarUrl={profile.avatar_url}
+                  avatarMode={profile.avatar_mode}
+                  size="md"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold truncate">{profile.full_name}</p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {profile.username ? `@${profile.username}` : role}
+                  </p>
+                  {(profile as any).class_name && (
+                    <p className="text-xs text-primary font-medium truncate mt-0.5">
+                      {(profile as any).class_name} • {(profile as any).school_name}
+                    </p>
+                  )}
+                </div>
+              </div>
+              
+              {profile.bio && (
+                <p className="text-xs text-muted-foreground mb-3 line-clamp-2 italic">
+                  "{profile.bio}"
+                </p>
+              )}
+
+              {/* XP Bar (More Data) */}
+              <div className="space-y-1 mb-3 bg-muted/30 p-2 rounded-lg">
+                <div className="flex justify-between text-xs font-medium">
+                  <span>Level {profile.level || 1}</span>
+                  <span className="text-muted-foreground">{profile.xp || 0} XP</span>
+                </div>
+                <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-primary transition-all duration-500" 
+                    style={{ width: `${Math.min(100, ((profile.xp || 0) / ((profile.level || 1) * 100)) * 100)}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Minimalist Settings Row */}
+              <div className="flex items-center justify-between gap-2 mb-3 border-t border-border pt-2">
+                <span className="text-xs font-medium text-muted-foreground">{t.navigation.appSettings}</span>
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                    className="p-1.5 rounded-md bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
+                    title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+                  >
+                    {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+                  </button>
+                  <button
+                    onClick={() => {
+                      const newLocale = locale === "en" ? "id" : "en";
+                      localStorage.setItem("app-locale", newLocale);
+                      window.location.reload();
+                    }}
+                    className="p-1.5 rounded-md bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors flex items-center gap-1 text-xs"
+                    title="Change Language"
+                  >
+                    <Globe className="h-3.5 w-3.5" />
+                    <span>{locale === "en" ? "EN" : "ID"}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="space-y-1 border-t border-border pt-2">
+                <Link
+                  href={`/${role}/settings`}
+                  onClick={() => setShowProfileMenu(false)}
+                  className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted w-full transition-colors"
+                >
+                  <Settings className="h-4 w-4" />
+                  {t.navigation.updateProfile}
+                </Link>
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-destructive hover:bg-destructive/10 w-full transition-colors"
+                >
+                  <LogOut className="h-4 w-4" />
+                  {t.navigation.signOut}
+                </button>
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{userName}</p>
-              <p className="text-xs text-muted-foreground capitalize">{role}</p>
-            </div>
-          </div>
+          )}
+
+          {/* Trigger Button */}
           <button
-            onClick={handleLogout}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-destructive hover:bg-red-500/10 w-full transition-colors"
+            onClick={() => setShowProfileMenu(!showProfileMenu)}
+            className={cn(
+              "flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-muted w-full transition-colors text-left",
+              showProfileMenu && "bg-muted"
+            )}
           >
-            <LogOut className="h-4.5 w-4.5" />
-            Sign Out
+            <AvatarDisplay
+              fullName={profile.full_name || "User"}
+              avatarUrl={profile.avatar_url}
+              avatarMode={profile.avatar_mode}
+              size="sm"
+            />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold truncate">{profile.full_name}</p>
+              {role === "student" ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                  <span>Lvl {profile.level || 1}</span>
+                  <span className="flex items-center gap-0.5">
+                    <Coins className="h-3 w-3 text-amber-500" />
+                    {profile.coins || 0}
+                  </span>
+                  <span className="flex items-center gap-0.5">
+                    <Flame className="h-3 w-3 text-orange-500" />
+                    {profile.streak_current || 0}
+                  </span>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground truncate capitalize">{role}</p>
+              )}
+            </div>
+            <ChevronUp className={cn("h-4 w-4 text-muted-foreground transition-transform", showProfileMenu && "rotate-180")} />
           </button>
         </div>
       </aside>

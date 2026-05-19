@@ -2,12 +2,19 @@
 export async function startCamera(
   videoEl: HTMLVideoElement
 ): Promise<MediaStream> {
+  // Use very permissive constraints to avoid OverconstrainedError on some devices
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+    video: { facingMode: "user" },
     audio: false,
   });
   videoEl.srcObject = stream;
-  await videoEl.play();
+  try {
+    await videoEl.play();
+  } catch (err: any) {
+    if (err.name !== "AbortError") {
+      console.warn("Video play error:", err);
+    }
+  }
   return stream;
 }
 

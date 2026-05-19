@@ -18,7 +18,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen">
-      <Sidebar role={role} userName={profile.full_name || "User"} />
+      <Sidebar role={role} profile={profile} />
       <main className="lg:ml-64 pt-14 pb-20 lg:pt-0 lg:pb-0 min-h-screen">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
           {children}

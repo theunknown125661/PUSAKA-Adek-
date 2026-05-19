@@ -28,6 +28,23 @@ export function useUserRole() {
       if (data) {
         setProfile(data as Profile);
         setRole(data.role as UserRole);
+
+        // Fetch school and class if student
+        if (data.role === "student") {
+          const { data: enr } = await supabase
+            .from("enrollments")
+            .select("classes(name, schools(name))")
+            .eq("student_id", user.id)
+            .maybeSingle();
+          
+          if (enr) {
+            setProfile({
+              ...data,
+              class_name: (enr.classes as any)?.name,
+              school_name: ((enr.classes as any)?.schools as any)?.name
+            } as any);
+          }
+        }
       }
       setLoading(false);
     }
