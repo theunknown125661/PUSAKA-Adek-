@@ -81,9 +81,14 @@ export default function RewardsAdminPage() {
     if (!rules.id) {
       const { data: { user } } = await supabase.auth.getUser();
       const { data: profile } = await supabase.from("profiles").select("school_id").eq("id", user?.id).single();
-      const schoolId = profile?.school_id;
+      let schoolId = profile?.school_id;
       if (!schoolId) {
-        setMsg("Error: Admin profile does not have a school assigned.");
+        const { data: firstSchool } = await supabase.from("schools").select("id").limit(1).single();
+        if (firstSchool) schoolId = firstSchool.id;
+      }
+      
+      if (!schoolId) {
+        setMsg("Error: No schools exist in the database. Please create a school first.");
         setSaving(false);
         return;
       }

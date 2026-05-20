@@ -11,7 +11,8 @@ import { useTranslation } from "@/lib/i18n/use-translation";
 import {
   LayoutDashboard, MapPin, History, Wallet, Users, User, Coins, Flame,
   ClipboardCheck, Settings, BookOpen, Shield, LogOut, GraduationCap,
-  AlertTriangle, Gift, Library, BarChart3, ChevronUp, Sun, Moon, Globe, Calendar as CalendarIcon, Store, Medal, ClipboardList
+  AlertTriangle, Gift, Library, BarChart3, ChevronUp, Sun, Moon, Globe, Calendar as CalendarIcon, Store, Medal, ClipboardList,
+  Menu, X
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
@@ -89,10 +90,19 @@ const getNavConfig = (t: any): Record<UserRole, NavSection[]> => ({
 export function Sidebar({ role, profile }: { role: UserRole; profile: Profile }) {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showHoverProfile, setShowHoverProfile] = useState(false);
+  const [showMobileDrawer, setShowMobileDrawer] = useState(false);
   const { theme, setTheme } = useTheme();
   const { t, locale } = useTranslation();
   const pathname = usePathname();
   const router = useRouter();
+
+  const studentBottomItems = [
+    { href: "/student", label: t.navigation.dashboard, icon: LayoutDashboard },
+    { href: "/student/history", label: t.navigation.history, icon: History },
+    { href: "/student/wallet", label: t.navigation.wallet, icon: Wallet },
+    { href: "/student/shop", label: t.navigation.rewardShop, icon: Store },
+    { href: "/student/settings", label: t.navigation.profile, icon: User },
+  ];
 
   const [metrics, setMetrics] = useState<{
     classesCount?: number;
@@ -389,6 +399,15 @@ export function Sidebar({ role, profile }: { role: UserRole; profile: Profile })
       {/* Mobile top header */}
       <header className="lg:hidden fixed top-0 left-0 right-0 z-30 bg-card/90 backdrop-blur-xl border-b border-border h-14 flex items-center justify-between px-4 safe-area-top">
         <div className="flex items-center gap-2">
+          {role !== "student" && (
+            <button
+              onClick={() => setShowMobileDrawer(!showMobileDrawer)}
+              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors mr-1"
+              title="Toggle Menu"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+          )}
           <div className="h-7 w-7 rounded-md bg-primary flex items-center justify-center shrink-0">
             <span className="text-primary-foreground font-bold text-xs">SP</span>
           </div>
@@ -403,32 +422,117 @@ export function Sidebar({ role, profile }: { role: UserRole; profile: Profile })
         </button>
       </header>
 
-      {/* Mobile bottom nav - scrollable horizontally for many items */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-card/90 backdrop-blur-xl border-t border-border safe-area-bottom shadow-[0_-4px_24px_rgba(0,0,0,0.04)] dark:shadow-[0_-4px_24px_rgba(0,0,0,0.2)]">
-        <div className="flex items-center justify-around gap-1 px-2 py-1.5 overflow-x-auto hide-scrollbar">
-          {allItems.map((item) => {
-            const isActive = pathname === item.href || (item.href !== `/${role}` && pathname.startsWith(item.href));
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "relative flex flex-col items-center justify-center gap-1 w-16 h-12 rounded-xl text-[10px] font-medium transition-all active:scale-95",
-                  isActive ? "text-primary" : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <div className={cn("relative flex items-center justify-center p-1 rounded-full transition-all duration-300", isActive && "bg-primary/10 text-primary")}>
-                  <item.icon className={cn("h-5 w-5 transition-transform duration-300", isActive && "scale-110")} />
+      {/* Mobile Side Drawer for Teachers and Admins */}
+      {role !== "student" && showMobileDrawer && (
+        <div className="lg:hidden fixed inset-0 z-40 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="fixed inset-y-0 left-0 w-72 bg-card border-r border-border p-5 flex flex-col animate-in slide-in-from-left duration-200">
+            <div className="flex items-center justify-between pb-5 border-b border-border mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
+                  <span className="text-primary-foreground font-bold text-xs">SP</span>
                 </div>
-                <span className={cn("truncate w-full text-center transition-all duration-300", isActive ? "opacity-100 font-bold" : "opacity-80")}>{item.label}</span>
-                {isActive && (
-                  <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-primary animate-slide-up" />
-                )}
-              </Link>
-            );
-          })}
+                <div>
+                  <span className="font-bold text-sm">School Present</span>
+                  <span className="text-[10px] text-muted-foreground block capitalize">{role} Portal</span>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowMobileDrawer(false)}
+                className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Drawer Scrollable Nav */}
+            <nav className="flex-grow overflow-y-auto space-y-4 pr-1 hide-scrollbar">
+              {sections.map((section, idx) => (
+                <div key={idx} className="space-y-1">
+                  {section.title && (
+                    <h4 className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 mt-2">
+                      {section.title}
+                    </h4>
+                  )}
+                  {section.items.map((item) => {
+                    const isActive = pathname === item.href || (item.href !== `/${role}` && pathname.startsWith(item.href));
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={() => setShowMobileDrawer(false)}
+                        className={cn(
+                          "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200",
+                          isActive
+                            ? "bg-primary/10 text-primary shadow-sm"
+                            : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                        )}
+                      >
+                        <item.icon className="h-4.5 w-4.5" />
+                        {item.label}
+                      </Link>
+                    );
+                  })}
+                </div>
+              ))}
+            </nav>
+
+            {/* Drawer Profile Info and Sign out */}
+            <div className="pt-4 border-t border-border mt-auto">
+              <div className="flex items-center gap-3 mb-4">
+                <AvatarDisplay
+                  fullName={profile.full_name || "User"}
+                  avatarUrl={profile.avatar_url}
+                  avatarMode={profile.avatar_mode}
+                  size="sm"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold truncate">{profile.full_name}</p>
+                  <p className="text-xs text-muted-foreground truncate capitalize">{role}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowMobileDrawer(false);
+                  handleLogout();
+                }}
+                className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-destructive hover:bg-destructive/10 w-full transition-colors"
+              >
+                <LogOut className="h-4 w-4" />
+                {t.navigation.signOut}
+              </button>
+            </div>
+          </div>
         </div>
-      </nav>
+      )}
+
+      {/* Mobile bottom nav - student only */}
+      {role === "student" && (
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-card/90 backdrop-blur-xl border-t border-border safe-area-bottom shadow-[0_-4px_24px_rgba(0,0,0,0.04)] dark:shadow-[0_-4px_24px_rgba(0,0,0,0.2)] animate-in slide-in-from-bottom duration-200">
+          <div className="flex items-center justify-around gap-1 px-2 py-1.5 overflow-x-auto hide-scrollbar">
+            {studentBottomItems.map((item) => {
+              const isActive = pathname === item.href || (item.href !== "/student" && pathname.startsWith(item.href));
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    "relative flex flex-col items-center justify-center gap-1 w-16 h-12 rounded-xl text-[10px] font-medium transition-all active:scale-95",
+                    isActive ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <div className={cn("relative flex items-center justify-center p-1 rounded-full transition-all duration-300", isActive && "bg-primary/10 text-primary")}>
+                    <item.icon className={cn("h-5 w-5 transition-transform duration-300", isActive && "scale-110")} />
+                  </div>
+                  <span className={cn("truncate w-full text-center transition-all duration-300", isActive ? "opacity-100 font-bold" : "opacity-80")}>{item.label}</span>
+                  {isActive && (
+                    <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-primary animate-slide-up" />
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+        </nav>
+      )}
     </>
   );
 }

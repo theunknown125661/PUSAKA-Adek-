@@ -23,6 +23,7 @@ interface SchoolConfig {
 
 export default function AdminSettingsPage() {
   const [school, setSchool] = useState<SchoolConfig | null>(null);
+  const [allSchools, setAllSchools] = useState<SchoolConfig[]>([]);
   const [profile, setProfile] = useState<any>(null);
   const [fullName, setFullName] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -41,12 +42,9 @@ export default function AdminSettingsPage() {
   useEffect(() => {
     const supabase = createClient();
     async function load() {
-      // Fetch school
-      const { data: sData } = await supabase.from("schools").select("*").limit(1).single();
-      if (sData) setSchool(sData as SchoolConfig);
-
       // Fetch profile
       const { data: { user } } = await supabase.auth.getUser();
+      let currentSchoolId: string | null = null;
       if (user) {
         const { data: pData } = await supabase.from("profiles").select("*").eq("id", user.id).single();
         if (pData) {
@@ -54,7 +52,23 @@ export default function AdminSettingsPage() {
           setFullName(pData.full_name || "");
           setAvatarUrl(pData.avatar_url);
           setAvatarMode(pData.avatar_mode || "initials");
+          currentSchoolId = pData.school_id;
         }
+      }
+
+      // Fetch all schools
+      const { data: allSData } = await supabase.from("schools").select("*");
+      if (allSData && allSData.length > 0) {
+        setAllSchools(allSData as SchoolConfig[]);
+        
+        // If admin has no school_id, fall back to the first school in the database
+        if (!currentSchoolId) {
+          currentSchoolId = allSData[0].id;
+        }
+        
+        // Set the active school to edit
+        const activeSchool = allSData.find(s => s.id === currentSchoolId) || allSData[0];
+        setSchool(activeSchool as SchoolConfig);
       }
       setLoading(false);
     }
@@ -135,6 +149,26 @@ export default function AdminSettingsPage() {
     
     setSavingProfile(false);
     setTimeout(() => setPasswordMsg(""), 3000);
+  };
+
+  const handleSwitchSchool = async (newSchoolId: string) => {
+    if (!profile) return;
+    setSavingProfile(true);
+    const supabase = createClient();
+    
+    const { error } = await supabase
+      .from("profiles")
+      .update({ school_id: newSchoolId })
+      .eq("id", profile.id);
+      
+    if (error) {
+      toast.error("Failed to switch school");
+      setSavingProfile(false);
+    } else {
+      toast.success("Active school changed!");
+      // Reload the page to refresh all school settings
+      window.location.reload();
+    }
   };
 
   if (!isClient || loading) return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
@@ -231,6 +265,32 @@ export default function AdminSettingsPage() {
           </div>
         </div>
       )}
+
+      {/* ACTIVE SCHOOL SELECTOR */}
+      <div className="glass rounded-2xl p-6 border border-border shadow-sm">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 bg-primary/10 rounded-lg text-primary">
+            <ShieldAlert className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold">Active School</h2>
+            <p className="text-sm text-muted-foreground">Select which school you are currently managing</p>
+          </div>
+        </div>
+        
+        <div className="max-w-md">
+          <select 
+            value={school?.id || ""} 
+            onChange={(e) => handleSwitchSchool(e.target.value)}
+            disabled={savingProfile}
+            className="w-full px-4 py-2.5 rounded-xl bg-background border border-border focus:ring-2 focus:ring-primary/50 disabled:opacity-50"
+          >
+            {allSchools.map(s => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       {!school && (
         <div className="glass rounded-2xl p-6 text-center space-y-4">

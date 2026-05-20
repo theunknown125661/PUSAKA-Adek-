@@ -144,7 +144,11 @@ export default function AdminReportsPage() {
   const [classes, setClasses] = useState<ClassModel[]>([]);
   const [wallets, setWallets] = useState<WalletModel[]>([]);
   const [cosmetics, setCosmetics] = useState<any[]>([]);
-  const [rewardRules, setRewardRules] = useState<any>(null);
+   const [rewardRules, setRewardRules] = useState<any>(null);
+  
+  // Schools selector support
+  const [schools, setSchools] = useState<any[]>([]);
+  const [selectedSchoolId, setSelectedSchoolId] = useState<string>("");
   
   // Loading states
   const [loading, setLoading] = useState(true);
@@ -176,29 +180,48 @@ export default function AdminReportsPage() {
     }
   }, [datePreset]);
 
-  const loadData = async (silent = false) => {
+  // Initial load of schools
+  useEffect(() => {
+    async function initSchools() {
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data: sList } = await supabase.from("schools").select("id, name");
+        const loadedSchools = sList || [];
+        setSchools(loadedSchools);
+
+        const { data: adminProfile } = await supabase
+          .from("profiles")
+          .select("school_id")
+          .eq("id", user.id)
+          .single();
+        
+        let initialSchoolId = adminProfile?.school_id;
+        if (!initialSchoolId && loadedSchools.length > 0) {
+          initialSchoolId = loadedSchools[0].id;
+        }
+
+        if (initialSchoolId) {
+          setSelectedSchoolId(initialSchoolId);
+        } else {
+          setLoading(false);
+        }
+      } catch (e) {
+        console.error("Failed to load schools:", e);
+        setLoading(false);
+      }
+    }
+    initSchools();
+  }, []);
+
+  const loadData = async (activeSchoolId: string, silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     
     try {
       const supabase = createClient();
-      
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      
-      const { data: adminProfile } = await supabase
-        .from("profiles")
-        .select("school_id")
-        .eq("id", user.id)
-        .single();
-      
-      const schoolId = adminProfile?.school_id;
-      if (!schoolId) {
-        toast.error("No school assigned to your admin profile.");
-        setLoading(false);
-        setRefreshing(false);
-        return;
-      }
       
       const startIso = new Date(startDate).toISOString();
       const endOfDay = new Date(endDate);
@@ -220,18 +243,18 @@ export default function AdminReportsPage() {
         rulesRes,
         assignmentsRes
       ] = await Promise.all([
-        supabase.from("profiles").select("*").eq("school_id", schoolId).eq("role", "student"),
-        supabase.from("streaks").select("*, profiles!inner(school_id)").eq("profiles.school_id", schoolId),
-        supabase.from("attendance_logs").select("*, profiles!inner(school_id, full_name), classes(name, grade_level)").eq("profiles.school_id", schoolId).gte("attendance_date", startDate).lte("attendance_date", endDate),
-        supabase.from("wallet_transactions").select("*, profiles!inner(school_id)").eq("profiles.school_id", schoolId).gte("created_at", startIso).lte("created_at", endIso),
-        supabase.from("payout_requests").select("*, profiles!inner(school_id)").eq("profiles.school_id", schoolId).gte("created_at", startIso).lte("created_at", endIso),
-        supabase.from("user_badges").select("*, profiles!inner(school_id), badges(*)").eq("profiles.school_id", schoolId).gte("unlocked_at", startIso).lte("unlocked_at", endIso),
-        supabase.from("purchases").select("*, shop_items(*), profiles!inner(school_id)").eq("profiles.school_id", schoolId).gte("purchased_at", startIso).lte("purchased_at", endIso),
-        supabase.from("classes").select("*").eq("school_id", schoolId),
-        supabase.from("wallets").select("*, profiles!inner(school_id)").eq("profiles.school_id", schoolId),
+        supabase.from("profiles").select("*").eq("school_id", activeSchoolId).eq("role", "student"),
+        supabase.from("streaks").select("*, profiles!inner(school_id)").eq("profiles.school_id", activeSchoolId),
+        supabase.from("attendance_logs").select("*, profiles!inner(school_id, full_name), classes(name, grade_level)").eq("profiles.school_id", activeSchoolId).gte("attendance_date", startDate).lte("attendance_date", endDate),
+        supabase.from("wallet_transactions").select("*, profiles!inner(school_id)").eq("profiles.school_id", activeSchoolId).gte("created_at", startIso).lte("created_at", endIso),
+        supabase.from("payout_requests").select("*, profiles!inner(school_id)").eq("profiles.school_id", activeSchoolId).gte("created_at", startIso).lte("created_at", endIso),
+        supabase.from("user_badges").select("*, profiles!inner(school_id), badges(*)").eq("profiles.school_id", activeSchoolId).gte("unlocked_at", startIso).lte("unlocked_at", endIso),
+        supabase.from("purchases").select("*, shop_items(*), profiles!inner(school_id)").eq("profiles.school_id", activeSchoolId).gte("purchased_at", startIso).lte("purchased_at", endIso),
+        supabase.from("classes").select("*").eq("school_id", activeSchoolId),
+        supabase.from("wallets").select("*, profiles!inner(school_id)").eq("profiles.school_id", activeSchoolId),
         supabase.from("cosmetics").select("id, name, type"),
-        supabase.from("reward_rules").select("*").eq("school_id", schoolId).maybeSingle(),
-        supabase.from("enrollments").select("*, classes!inner(school_id)").eq("classes.school_id", schoolId)
+        supabase.from("reward_rules").select("*").eq("school_id", activeSchoolId).maybeSingle(),
+        supabase.from("enrollments").select("*, classes!inner(school_id)").eq("classes.school_id", activeSchoolId)
       ]);
 
       if (studentsRes.error) throw studentsRes.error;
@@ -297,8 +320,10 @@ export default function AdminReportsPage() {
   };
 
   useEffect(() => {
-    loadData();
-  }, [startDate, endDate]);
+    if (selectedSchoolId) {
+      loadData(selectedSchoolId);
+    }
+  }, [startDate, endDate, selectedSchoolId]);
 
   if (!isClient) return null;
 
@@ -668,6 +693,21 @@ export default function AdminReportsPage() {
 
         {/* Global filter container */}
         <div className="flex flex-wrap items-center gap-2.5 bg-card/60 p-2.5 rounded-2xl border border-border/80 shadow-md">
+          {/* School Selector */}
+          {schools.length > 0 && (
+            <select
+              value={selectedSchoolId}
+              onChange={(e) => setSelectedSchoolId(e.target.value)}
+              className="px-2.5 py-1.5 bg-background border border-cyan-500/30 text-cyan-500 text-xs rounded-lg font-bold focus:outline-none focus:ring-1 focus:ring-cyan-500 cursor-pointer"
+            >
+              {schools.map((s) => (
+                <option key={s.id} value={s.id}>
+                  🏫 {s.name}
+                </option>
+              ))}
+            </select>
+          )}
+
           {/* Preset Select */}
           <select 
             value={datePreset}
@@ -733,7 +773,7 @@ export default function AdminReportsPage() {
           </select>
 
           <button 
-            onClick={() => loadData(true)}
+            onClick={() => loadData(selectedSchoolId, true)}
             disabled={refreshing}
             className="p-1.5 bg-background hover:bg-muted text-muted-foreground rounded-lg transition-colors border border-border"
             title="Refresh statistics"
