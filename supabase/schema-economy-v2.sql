@@ -104,7 +104,7 @@ CREATE POLICY "Admins manage payout requests" ON public.payout_requests FOR ALL 
 
 -- Function to ensure wallets exist for a user
 CREATE OR REPLACE FUNCTION public.ensure_user_wallets()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER SECURITY DEFINER AS $$
 BEGIN
   -- Create COIN wallet
   INSERT INTO public.wallets (user_id, currency_type, balance_available)
@@ -150,7 +150,7 @@ END $$;
 -- ============================================
 
 CREATE OR REPLACE FUNCTION public.process_attendance_economy_v2()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER SECURITY DEFINER AS $$
 DECLARE
   v_config JSONB;
   v_coin_reward INTEGER := 20;

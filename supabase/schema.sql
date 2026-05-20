@@ -439,7 +439,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- AUTO-CREATE PROFILE ON SIGNUP
 -- ============================================
 CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER SECURITY DEFINER AS $$
 BEGIN
   INSERT INTO public.profiles (id, role, full_name, email)
   VALUES (

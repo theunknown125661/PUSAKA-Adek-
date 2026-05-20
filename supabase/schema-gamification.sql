@@ -88,7 +88,7 @@ CREATE POLICY "Admins manage holidays" ON public.holiday_calendar FOR ALL USING 
 -- This function runs when an attendance log is approved.
 -- It correctly handles holidays and weekends (assuming Mon-Fri school).
 CREATE OR REPLACE FUNCTION public.process_attendance_streak()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER SECURITY DEFINER AS $$
 DECLARE
   v_streak_record RECORD;
   v_eligible_days_missed INTEGER;
@@ -205,7 +205,7 @@ CREATE POLICY "Users read own coin transactions" ON public.coin_transactions FOR
 -- ECONOMY ENGINE TRIGGER (XP & Coins)
 -- ============================================
 CREATE OR REPLACE FUNCTION public.process_attendance_economy()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER SECURITY DEFINER AS $$
 DECLARE
   v_xp_reward INTEGER := 100;
   v_coin_reward INTEGER := 10;
