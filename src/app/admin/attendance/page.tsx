@@ -55,6 +55,7 @@ export default function AttendanceReviewPage() {
       const { error: reviewError } = await supabase.from("attendance_reviews").insert({
         attendance_id: logId,
         reviewer_id: user?.id,
+        reviewer_role: "admin",
         action,
         note: note || null,
       });

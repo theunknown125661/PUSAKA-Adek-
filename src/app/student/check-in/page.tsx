@@ -11,7 +11,7 @@ import { haversineDistance } from "@/lib/utils/haversine";
 import { formatDistance, formatAccuracy } from "@/lib/utils/format";
 import { detectFraudFlags } from "@/lib/utils/fraud-flags";
 
-import { MapPin, Camera, Clock, Gift, RefreshCw, Send, CheckCircle2 } from "lucide-react";
+import { MapPin, Camera, Clock, Gift, RefreshCw, Send, CheckCircle2, GraduationCap } from "lucide-react";
 import { StatefulButton, type ButtonState } from "@/components/ui/stateful-button";
 import { RequirementItem, type RequirementStatus } from "@/components/ui/requirement-item";
 import { ValidationSummary, type ValidationError } from "@/components/ui/validation-summary";
@@ -38,13 +38,17 @@ export default function CheckInPage() {
   
   const [submitState, setSubmitState] = useState<ButtonState>("idle");
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
+  const [noEnrollment, setNoEnrollment] = useState(false);
 
   useEffect(() => {
     if (!profile) return;
     const supabase = createClient();
     async function loadMeta() {
-      const { data: enr } = await supabase.from("enrollments").select("class_id, classes(school_id)").eq("student_id", profile!.id).limit(1).single();
-      if (!enr) return;
+      const { data: enr } = await supabase.from("enrollments").select("class_id, classes(school_id)").eq("student_id", profile!.id).limit(1).maybeSingle();
+      if (!enr) {
+        setNoEnrollment(true);
+        return;
+      }
       const schoolId = (enr.classes as unknown as { school_id: string })?.school_id;
       setEnrollment({ class_id: enr.class_id, school_id: schoolId });
 
@@ -192,6 +196,24 @@ export default function CheckInPage() {
   };
 
   if (!isClient) return null;
+
+  if (noEnrollment) {
+    return (
+      <div className="animate-fade-in flex flex-col items-center justify-center text-center py-20 px-4 max-w-md mx-auto">
+        <div className="h-20 w-20 rounded-full bg-amber-500/10 flex items-center justify-center mb-6 ring-8 ring-amber-500/5">
+          <GraduationCap className="h-10 w-10 text-amber-500" />
+        </div>
+        <h1 className="text-2xl font-bold mb-3">Join a Class First</h1>
+        <p className="text-muted-foreground mb-8 text-sm">
+          You are not enrolled in any class yet. You must select a school and class before you can submit attendance.
+        </p>
+        <StatefulButton 
+          label="Choose Class"
+          onClick={() => router.push("/student/class")} 
+        />
+      </div>
+    );
+  }
 
   if (alreadySubmitted) {
     return (

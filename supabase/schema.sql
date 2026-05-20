@@ -303,6 +303,9 @@ CREATE POLICY "Admins manage assignments" ON public.teacher_class_assignments FO
 
 -- ENROLLMENTS
 CREATE POLICY "Students read own enrollment" ON public.enrollments FOR SELECT USING (student_id = auth.uid());
+CREATE POLICY "Students insert own enrollment" ON public.enrollments FOR INSERT WITH CHECK (student_id = auth.uid());
+CREATE POLICY "Students update own enrollment" ON public.enrollments FOR UPDATE USING (student_id = auth.uid()) WITH CHECK (student_id = auth.uid());
+CREATE POLICY "Students delete own enrollment" ON public.enrollments FOR DELETE USING (student_id = auth.uid());
 CREATE POLICY "Teachers read class enrollments" ON public.enrollments FOR SELECT USING (teacher_has_class(class_id));
 CREATE POLICY "Admins manage enrollments" ON public.enrollments FOR ALL USING (get_my_role() = 'admin');
 

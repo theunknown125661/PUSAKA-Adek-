@@ -42,14 +42,14 @@ export default function AdminDashboard() {
         supabase.from("attendance_logs").select("id", { count: "exact" }).not("teacher_flag_status", "is", null).eq("attendance_date", today),
         supabase.from("attendance_logs").select("id", { count: "exact" }).eq("status", "approved").eq("attendance_date", today),
         supabase.from("attendance_logs").select("id", { count: "exact" }).eq("status", "rejected").eq("attendance_date", today),
-        supabase.from("withdrawal_requests").select("id", { count: "exact" }).eq("status", "pending"),
-        supabase.from("wallets").select("held_balance"),
+        supabase.from("payout_requests").select("id", { count: "exact" }).eq("state", "REQUESTED"),
+        supabase.from("wallets").select("balance_locked"),
         supabase.from("profiles").select("id", { count: "exact" }).eq("role", "student"),
-        supabase.from("wallet_transactions").select("amount").eq("type", "attendance_reward").gte("created_at", lastWeekIso),
+        supabase.from("wallet_transactions").select("amount").eq("event_type", "attendance_reward").gte("created_at", lastWeekIso),
         supabase.from("attendance_reviews").select("*, reviewer:profiles!reviewer_id(full_name), attendance_logs!inner(attendance_date, profiles!student_id(full_name))").order("created_at", { ascending: false }).limit(5)
       ]);
 
-      const totalHeld = (heldRes.data || []).reduce((a: number, w: { held_balance: number }) => a + (w.held_balance || 0), 0);
+      const totalHeld = (heldRes.data || []).reduce((a: number, w: any) => a + (w.balance_locked || 0), 0);
       const totalWeeklyRewards = (rewardsRes.data || []).reduce((a: number, t: { amount: number }) => a + (t.amount || 0), 0);
       
       const totalStudents = studentsRes.count || 1; // Prevent div by 0

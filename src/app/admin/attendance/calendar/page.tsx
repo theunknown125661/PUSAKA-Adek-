@@ -55,8 +55,8 @@ export default function AdminStudentCalendarPage() {
         .from("attendance_logs")
         .select("*")
         .eq("student_id", selectedStudentId)
-        .gte("date", format(start, "yyyy-MM-dd"))
-        .lte("date", format(end, "yyyy-MM-dd")),
+        .gte("attendance_date", format(start, "yyyy-MM-dd"))
+        .lte("attendance_date", format(end, "yyyy-MM-dd")),
       supabase
         .from("holiday_calendar")
         .select("*")
@@ -199,7 +199,7 @@ export default function AdminStudentCalendarPage() {
                 {/* Calendar Days */}
                 {days.map(day => {
                   const dateStr = format(day, "yyyy-MM-dd");
-                  const att = attendance.find(a => a.date === dateStr);
+                  const att = attendance.find(a => a.attendance_date === dateStr);
                   const isHoliday = holidays.some(h => h.date === dateStr);
                   
                   let bgClass = "bg-muted/30 hover:bg-muted/50";

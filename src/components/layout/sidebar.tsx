@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -25,12 +25,12 @@ const getNavConfig = (t: any): Record<UserRole, NavSection[]> => ({
       items: [
         { href: "/student", label: t.navigation.dashboard, icon: LayoutDashboard },
         { href: "/student/check-in", label: t.navigation.checkIn, icon: MapPin },
+        { href: "/student/class", label: t.navigation.myClass, icon: BookOpen },
         { href: "/student/shop", label: t.navigation.rewardShop, icon: Store },
         { href: "/student/badges", label: t.navigation.badges, icon: Medal },
         { href: "/student/quests", label: t.navigation.quests, icon: ClipboardList },
         { href: "/student/history", label: t.navigation.history, icon: History },
         { href: "/student/wallet", label: t.navigation.wallet, icon: Wallet },
-        { href: "/student/profile", label: t.navigation.profile, icon: User },
       ]
     }
   ],
@@ -93,6 +93,68 @@ export function Sidebar({ role, profile }: { role: UserRole; profile: Profile })
   const { t, locale } = useTranslation();
   const pathname = usePathname();
   const router = useRouter();
+
+  const [metrics, setMetrics] = useState<{
+    classesCount?: number;
+    studentsCount?: number;
+    totalStudents?: number;
+    pendingReviews?: number;
+    pendingWithdrawals?: number;
+  }>({});
+
+  useEffect(() => {
+    const supabase = createClient();
+    async function loadMetrics() {
+      if (role === "teacher") {
+        // Fetch classes taught by this teacher
+        const { data: classesData } = await supabase
+          .from("classes")
+          .select("id")
+          .eq("teacher_id", profile.id);
+        
+        const classesCount = classesData?.length || 0;
+        let studentsCount = 0;
+        if (classesData && classesData.length > 0) {
+          const { count } = await supabase
+            .from("enrollments")
+            .select("*", { count: "exact", head: true })
+            .in("class_id", classesData.map(c => c.id));
+          studentsCount = count || 0;
+        }
+        setMetrics({ classesCount, studentsCount });
+      } else if (role === "admin") {
+        // Fetch total student count, flagged logs, and pending payouts
+        const { count: studentCount } = await supabase
+          .from("profiles")
+          .select("*", { count: "exact", head: true })
+          .eq("role", "student");
+
+        const { count: flaggedCount } = await supabase
+          .from("attendance_logs")
+          .select("*", { count: "exact", head: true })
+          .eq("status", "flagged");
+
+        const { count: payoutCount } = await supabase
+          .from("payout_requests")
+          .select("*", { count: "exact", head: true })
+          .eq("status", "REQUESTED");
+
+        setMetrics({
+          totalStudents: studentCount || 0,
+          pendingReviews: flaggedCount || 0,
+          pendingWithdrawals: payoutCount || 0,
+        });
+      }
+    }
+
+    loadMetrics();
+
+    // Listen for custom profile updates to synchronize metrics in real-time
+    window.addEventListener("profile-updated", loadMetrics);
+    return () => {
+      window.removeEventListener("profile-updated", loadMetrics);
+    };
+  }, [role, profile.id]);
   
   const navConfig = getNavConfig(t);
   const sections = navConfig[role] || [];
@@ -190,19 +252,49 @@ export function Sidebar({ role, profile }: { role: UserRole; profile: Profile })
                 </p>
               )}
 
-              {/* XP Bar (More Data) */}
-              <div className="space-y-1 mb-3 bg-muted/30 p-2 rounded-lg">
-                <div className="flex justify-between text-xs font-medium">
-                  <span>Level {profile.level || 1}</span>
-                  <span className="text-muted-foreground">{profile.xp || 0} XP</span>
+              {role === "student" ? (
+                /* Student XP Bar */
+                <div className="space-y-1 mb-3 bg-muted/30 p-2.5 rounded-xl border border-border/40">
+                  <div className="flex justify-between text-xs font-medium">
+                    <span>Level {profile.level || 1}</span>
+                    <span className="text-muted-foreground">{profile.xp || 0} XP</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-primary transition-all duration-500" 
+                      style={{ width: `${Math.min(100, ((profile.xp || 0) / ((profile.level || 1) * 100)) * 100)}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-primary transition-all duration-500" 
-                    style={{ width: `${Math.min(100, ((profile.xp || 0) / ((profile.level || 1) * 100)) * 100)}%` }}
-                  />
+              ) : role === "teacher" ? (
+                /* Teacher Stats */
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <div className="bg-muted/30 border border-border/40 p-2 rounded-xl text-center">
+                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Classes</p>
+                    <p className="text-lg font-extrabold text-primary mt-0.5">{metrics.classesCount ?? "-"}</p>
+                  </div>
+                  <div className="bg-muted/30 border border-border/40 p-2 rounded-xl text-center">
+                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Students</p>
+                    <p className="text-lg font-extrabold text-primary mt-0.5">{metrics.studentsCount ?? "-"}</p>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                /* Admin Stats */
+                <div className="grid grid-cols-3 gap-1.5 mb-3">
+                  <div className="bg-muted/30 border border-border/40 p-1.5 rounded-xl text-center">
+                    <p className="text-[9px] font-medium text-muted-foreground uppercase">Students</p>
+                    <p className="text-sm font-extrabold text-primary mt-0.5">{metrics.totalStudents ?? "-"}</p>
+                  </div>
+                  <div className="bg-muted/30 border border-border/40 p-1.5 rounded-xl text-center">
+                    <p className="text-[9px] font-medium text-muted-foreground uppercase">Flags</p>
+                    <p className="text-sm font-extrabold text-rose-500 mt-0.5">{metrics.pendingReviews ?? "-"}</p>
+                  </div>
+                  <div className="bg-muted/30 border border-border/40 p-1.5 rounded-xl text-center">
+                    <p className="text-[9px] font-medium text-muted-foreground uppercase">Payouts</p>
+                    <p className="text-sm font-extrabold text-amber-500 mt-0.5">{metrics.pendingWithdrawals ?? "-"}</p>
+                  </div>
+                </div>
+              )}
 
               {/* Minimalist Settings Row */}
               <div className="flex items-center justify-between gap-2 mb-3 border-t border-border pt-2">
@@ -237,8 +329,8 @@ export function Sidebar({ role, profile }: { role: UserRole; profile: Profile })
                   onClick={() => setShowProfileMenu(false)}
                   className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted w-full transition-colors"
                 >
-                  <Settings className="h-4 w-4" />
-                  {t.navigation.updateProfile}
+                  {role === "student" ? <User className="h-4 w-4" /> : <Settings className="h-4 w-4" />}
+                  {role === "student" ? t.navigation.profile : t.navigation.updateProfile}
                 </Link>
                 <button
                   onClick={handleLogout}
@@ -268,19 +360,25 @@ export function Sidebar({ role, profile }: { role: UserRole; profile: Profile })
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold truncate">{profile.full_name}</p>
               {role === "student" ? (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground mt-0.5">
                   <span>Lvl {profile.level || 1}</span>
                   <span className="flex items-center gap-0.5">
-                    <Coins className="h-3 w-3 text-amber-500" />
+                    <Coins className="h-2.5 w-2.5 text-amber-500" />
                     {profile.coins || 0}
                   </span>
                   <span className="flex items-center gap-0.5">
-                    <Flame className="h-3 w-3 text-orange-500" />
+                    <Flame className="h-2.5 w-2.5 text-orange-500" />
                     {profile.streak_current || 0}
                   </span>
                 </div>
+              ) : role === "teacher" ? (
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                  Tutor · {metrics.classesCount ?? 0} cls · {metrics.studentsCount ?? 0} std
+                </p>
               ) : (
-                <p className="text-xs text-muted-foreground truncate capitalize">{role}</p>
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                  Admin · {metrics.totalStudents ?? 0} std · {metrics.pendingReviews ?? 0} flg
+                </p>
               )}
             </div>
             <ChevronUp className={cn("h-4 w-4 text-muted-foreground transition-transform", showProfileMenu && "rotate-180")} />

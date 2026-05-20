@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useUserRole } from "@/lib/hooks/use-user-role";
 import { useTranslation } from "@/lib/i18n/use-translation";
 import { formatCurrency } from "@/lib/utils/format";
-import { MapPin, Flame, Trophy, Target, Wallet, Clock, ChevronRight, Calendar, Zap, Award, Star, ShieldAlert, CheckCircle2 } from "lucide-react";
+import { MapPin, Flame, Trophy, Target, Wallet, Clock, ChevronRight, Calendar, Zap, Award, Star, ShieldAlert, CheckCircle2, GraduationCap } from "lucide-react";
 import type { AttendanceLog, Wallet as WalletType, StudentBadge } from "@/lib/types/database";
 
 export default function StudentDashboard() {
@@ -27,13 +27,13 @@ export default function StudentDashboard() {
     async function load() {
       const [attRes, walRes, badgeRes, appRes, streakRes] = await Promise.all([
         supabase.from("attendance_logs").select("*").eq("student_id", profile!.id).eq("attendance_date", today).limit(1),
-        supabase.from("wallets").select("*").eq("student_id", profile!.id).single(),
+        supabase.from("wallets").select("*").eq("user_id", profile!.id).eq("currency_type", "RUPIAH").maybeSingle(),
         supabase.from("student_badges").select("*, badges(*)").eq("student_id", profile!.id),
         supabase.from("attendance_logs").select("id", { count: "exact" }).eq("student_id", profile!.id).eq("status", "approved"),
         supabase.from("streaks").select("*").eq("student_id", profile!.id).single(),
       ]);
       if (attRes.data?.[0]) setTodayAttendance(attRes.data[0]);
-      if (walRes.data) setWallet(walRes.data);
+      if (walRes.data) setWallet(walRes.data as any);
       if (badgeRes.data) setBadges(badgeRes.data as unknown as StudentBadge[]);
       setTotalApproved(appRes.count || 0);
       
@@ -58,6 +58,28 @@ export default function StudentDashboard() {
 
   // Status Card (Hero) logic
   const renderStatusHero = () => {
+    if (!(profile as any)?.class_name) {
+      return (
+        <Link href="/student/class" className="block w-full">
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-amber-500 to-orange-600 p-6 text-white shadow-lg shadow-orange-500/25 transition-transform active:scale-[0.98]">
+            <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
+            <div className="relative z-10 flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-bold mb-1">Join a Class!</h2>
+                <p className="text-white/80 text-sm font-medium">You need to choose a school and class before you can check in.</p>
+              </div>
+              <div className="h-14 w-14 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center shrink-0">
+                <GraduationCap className="h-7 w-7 text-white" />
+              </div>
+            </div>
+            <div className="mt-6 flex items-center gap-2 text-sm font-semibold text-white/90 bg-black/10 w-fit px-4 py-2 rounded-full backdrop-blur-md">
+              Choose Class <ChevronRight className="h-4 w-4" />
+            </div>
+          </div>
+        </Link>
+      );
+    }
+
     if (!todayAttendance) {
       return (
         <Link href="/student/check-in" className="block w-full">
@@ -198,21 +220,21 @@ export default function StudentDashboard() {
               <p className="text-xs text-muted-foreground font-medium mb-0.5">{t.dashboard.available}</p>
               <p className="text-[10px] text-muted-foreground/60 leading-tight mb-2">{t.dashboard.availableHelp}</p>
             </div>
-            <p className="text-sm font-bold text-success truncate">{formatCurrency(wallet?.available_balance || 0)}</p>
+            <p className="text-sm font-bold text-success truncate">{formatCurrency(wallet?.balance_available || 0)}</p>
           </div>
           <div className="bg-muted/50 rounded-xl p-3 flex flex-col justify-between">
             <div>
               <p className="text-xs text-muted-foreground font-medium mb-0.5">{t.dashboard.pending}</p>
               <p className="text-[10px] text-muted-foreground/60 leading-tight mb-2">{t.dashboard.pendingHelp}</p>
             </div>
-            <p className="text-sm font-bold text-warning truncate">{formatCurrency(wallet?.pending_balance || 0)}</p>
+            <p className="text-sm font-bold text-warning truncate">{formatCurrency(wallet?.balance_pending || 0)}</p>
           </div>
           <div className="bg-muted/50 rounded-xl p-3 flex flex-col justify-between">
             <div>
               <p className="text-xs text-muted-foreground font-medium mb-0.5">{t.dashboard.held}</p>
               <p className="text-[10px] text-muted-foreground/60 leading-tight mb-2">{t.dashboard.heldHelp}</p>
             </div>
-            <p className="text-sm font-bold text-info truncate">{formatCurrency(wallet?.held_balance || 0)}</p>
+            <p className="text-sm font-bold text-info truncate">{formatCurrency(wallet?.balance_locked || 0)}</p>
           </div>
         </div>
       </div>

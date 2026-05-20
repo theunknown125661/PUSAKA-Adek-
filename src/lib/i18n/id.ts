@@ -622,6 +622,7 @@ export const id: Messages = {
     history: "Riwayat",
     wallet: "Dompet",
     profile: "Profil",
+    myClass: "Kelas Saya",
     myClasses: "Kelas Saya",
     students: "Siswa",
     reviews: "Ulasan",

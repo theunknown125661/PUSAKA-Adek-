@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useTranslation } from "@/lib/i18n/use-translation";
-import { Calendar as CalendarIcon, Plus, Trash2, Loader2, AlertCircle } from "lucide-react";
+import { Calendar as CalendarIcon, Plus, Trash2, Loader2, AlertCircle, Pencil, X } from "lucide-react";
 import type { HolidayCalendar } from "@/lib/types/database";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -21,18 +21,68 @@ export default function AdminHolidaysPage() {
   const [type, setType] = useState<"national" | "school" | "exam">("national");
   const [schoolId, setSchoolId] = useState<string | null>(null);
 
+  // Edit State
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editType, setEditType] = useState<"national" | "school" | "exam">("national");
+  const [editIds, setEditIds] = useState<string[]>([]);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const handleOpenEdit = (group: any) => {
+    setEditName(group.name);
+    setEditType(group.type as any);
+    setEditIds(group.ids);
+    setShowEditModal(true);
+  };
+
+  const handleEditHoliday = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!schoolId || editIds.length === 0 || !editName) return;
+    
+    setSavingEdit(true);
+    const supabase = createClient();
+    
+    const { error } = await supabase
+      .from("holiday_calendar")
+      .update({
+        name: editName,
+        type: editType
+      })
+      .in("id", editIds);
+
+    if (error) {
+      toast.error(error.message);
+    } else {
+      toast.success("Holiday updated successfully!");
+      setShowEditModal(false);
+      fetchHolidays(schoolId);
+    }
+    setSavingEdit(false);
+  };
+
   useEffect(() => {
     const supabase = createClient();
 
     async function load() {
       // Get admin's school
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        setLoading(false);
+        return;
+      }
       
       const { data: profile } = await supabase.from("profiles").select("school_id").eq("id", user.id).single();
-      if (profile?.school_id) {
-        setSchoolId(profile.school_id);
-        fetchHolidays(profile.school_id);
+      let sId = profile?.school_id;
+      if (!sId) {
+        const { data: school } = await supabase.from("schools").select("id").limit(1).single();
+        sId = school?.id;
+      }
+
+      if (sId) {
+        setSchoolId(sId);
+        fetchHolidays(sId);
+      } else {
+        setLoading(false);
       }
     }
     load();
@@ -284,23 +334,32 @@ export default function AdminHolidaysPage() {
                             )}
                           </div>
                         </div>
-                        <button
-                          onClick={async () => {
-                            if (!confirm(interpolate(t.adminHolidays.confirmDeleteRange, { name: group.name }))) return;
-                            const supabase = createClient();
-                            const { error } = await supabase.from("holiday_calendar").delete().in("id", group.ids);
-                            if (error) {
-                              toast.error(error.message);
-                            } else {
-                              toast.success(t.adminHolidays.successDeleteRange);
-                              setHolidays(prev => prev.filter(h => !group.ids.includes(h.id)));
-                            }
-                          }}
-                          className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
-                          title={t.adminHolidays.removeHolidayRange}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleOpenEdit(group)}
+                            className="p-2 text-muted-foreground hover:text-indigo-500 hover:bg-indigo-500/10 rounded-lg transition-colors"
+                            title="Edit holiday name/type"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (!confirm(interpolate(t.adminHolidays.confirmDeleteRange, { name: group.name }))) return;
+                              const supabase = createClient();
+                              const { error } = await supabase.from("holiday_calendar").delete().in("id", group.ids);
+                              if (error) {
+                                toast.error(error.message);
+                              } else {
+                                toast.success(t.adminHolidays.successDeleteRange);
+                                setHolidays(prev => prev.filter(h => !group.ids.includes(h.id)));
+                              }
+                            }}
+                            className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+                            title={t.adminHolidays.removeHolidayRange}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -310,6 +369,59 @@ export default function AdminHolidaysPage() {
           </div>
         </div>
       </div>
+
+      {/* Edit Holiday Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
+          <div className="bg-card border border-border w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-fade-in">
+            <div className="px-6 py-4 border-b border-border flex justify-between items-center bg-muted/30">
+              <h2 className="font-bold text-base flex items-center gap-2">
+                <Pencil className="h-4 w-4 text-primary" /> Edit Holiday Group
+              </h2>
+              <button onClick={() => setShowEditModal(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            
+            <form onSubmit={handleEditHoliday} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-muted-foreground mb-1.5">Holiday Name</label>
+                <input 
+                  required
+                  type="text" 
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-muted/50 border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" 
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-muted-foreground mb-1.5">Holiday Type</label>
+                <select
+                  required
+                  value={editType}
+                  onChange={(e) => setEditType(e.target.value as any)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-muted/50 border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="national">{t.adminHolidays.typeNational}</option>
+                  <option value="school">{t.adminHolidays.typeSchool}</option>
+                  <option value="exam">{t.adminHolidays.typeExam}</option>
+                </select>
+              </div>
+
+              <div className="pt-2">
+                <button 
+                  type="submit" 
+                  disabled={savingEdit}
+                  className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-bold text-sm disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {savingEdit ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

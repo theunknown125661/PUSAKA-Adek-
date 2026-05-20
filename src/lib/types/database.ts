@@ -172,10 +172,12 @@ export interface RewardRules {
 
 export interface Wallet {
   id: string;
-  student_id: string;
-  pending_balance: number;
-  available_balance: number;
-  held_balance: number;
+  user_id: string;
+  currency_type: "COIN" | "RUPIAH";
+  balance_available: number;
+  balance_pending: number;
+  balance_locked: number;
+  created_at?: string;
   updated_at: string;
 }
 

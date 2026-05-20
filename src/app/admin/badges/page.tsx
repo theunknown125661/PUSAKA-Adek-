@@ -157,28 +157,49 @@ export default function AdminBadgesPage() {
         {badges.map((badge) => {
           const Icon = IconMap[badge.icon] || Medal;
           return (
-            <div key={badge.id} className={`card rounded-2xl p-5 border-2 transition-all ${!badge.active ? 'opacity-60 border-transparent' : 'border-transparent'}`}>
-              <div className="flex justify-between items-start mb-3">
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+            <div 
+              key={badge.id} 
+              className={`glass rounded-2xl p-5 border transition-all ${
+                !badge.active 
+                  ? 'opacity-40 border-border/20 bg-background/50' 
+                  : badge.rarity === 'legendary' 
+                    ? 'border-amber-500/30 bg-gradient-to-br from-amber-500/[0.03] to-amber-500/[0.08] shadow-lg shadow-amber-500/[0.02]' 
+                    : badge.rarity === 'epic' 
+                      ? 'border-purple-500/30 bg-gradient-to-br from-purple-500/[0.03] to-purple-500/[0.08] shadow-lg shadow-purple-500/[0.02]' 
+                      : badge.rarity === 'rare' 
+                        ? 'border-blue-500/30 bg-gradient-to-br from-blue-500/[0.03] to-blue-500/[0.08] shadow-lg shadow-blue-500/[0.02]' 
+                        : 'border-border/60 bg-gradient-to-br from-zinc-500/[0.01] to-zinc-500/[0.04]'
+              }`}
+            >
+              <div className="flex justify-between items-center mb-3">
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-muted/60 text-muted-foreground border border-border/30">
                   {badge.family}
                 </span>
                 <div className="flex gap-1">
-                  <button onClick={() => openModal(badge)} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground">
+                  <button onClick={() => openModal(badge)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
                     <Edit2 className="h-3.5 w-3.5" />
                   </button>
-                  <button onClick={() => handleDelete(badge.id)} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-destructive">
+                  <button onClick={() => handleDelete(badge.id)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-destructive transition-colors">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
               </div>
               
               <div className="flex items-center gap-3 mb-3">
-                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <Icon className="h-5 w-5 text-primary" />
+                <div className={`h-11 w-11 rounded-xl flex items-center justify-center shrink-0 border ${
+                  badge.rarity === 'legendary' 
+                    ? 'bg-amber-500/10 border-amber-500/20 text-amber-500 shadow-sm shadow-amber-500/10' 
+                    : badge.rarity === 'epic' 
+                      ? 'bg-purple-500/10 border-purple-500/20 text-purple-500 shadow-sm shadow-purple-500/10' 
+                      : badge.rarity === 'rare' 
+                        ? 'bg-blue-500/10 border-blue-500/20 text-blue-500 shadow-sm shadow-blue-500/10' 
+                        : 'bg-zinc-500/10 border-zinc-500/20 text-zinc-400'
+                }`}>
+                  <Icon className="h-5.5 w-5.5" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-sm leading-tight">{badge.name}</h3>
-                  <span className={`text-[10px] uppercase font-bold ${
+                  <h3 className="font-bold text-sm leading-tight text-foreground">{badge.name}</h3>
+                  <span className={`text-[10px] uppercase font-bold tracking-wider ${
                     badge.rarity === 'legendary' ? 'text-amber-500' :
                     badge.rarity === 'epic' ? 'text-purple-500' :
                     badge.rarity === 'rare' ? 'text-blue-500' :
@@ -192,12 +213,26 @@ export default function AdminBadgesPage() {
                 </div>
               </div>
               
-              <p className="text-xs text-muted-foreground line-clamp-2 h-8">{badge.description}</p>
+              <p className="text-xs text-muted-foreground line-clamp-2 h-8 leading-relaxed">{badge.description}</p>
               
-              <div className="mt-4 pt-4 border-t flex flex-col gap-1.5">
-                <div className="text-[10px] font-bold text-muted-foreground uppercase">{t.adminBadges.unlockRule}</div>
-                <div className="bg-muted px-2 py-1.5 rounded text-xs font-mono break-all text-foreground">
-                  {badge.unlock_rule?.type === "streak" ? t.adminBadges.streakMetric : badge.unlock_rule?.type === "level" ? t.adminBadges.levelMetric : badge.unlock_rule?.type} &gt;= {badge.unlock_rule?.value}
+              <div className="mt-4 pt-4 border-t border-border/40 flex flex-col gap-1.5">
+                <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">{t.adminBadges.unlockRule}</div>
+                <div className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold border ${
+                  badge.unlock_rule?.type === "streak"
+                    ? "bg-amber-500/5 text-amber-600 dark:text-amber-400 border-amber-500/10"
+                    : "bg-indigo-500/5 text-indigo-600 dark:text-indigo-400 border-indigo-500/10"
+                }`}>
+                  {badge.unlock_rule?.type === "streak" ? (
+                    <Flame className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                  ) : (
+                    <Trophy className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                  )}
+                  <span className="truncate">
+                    {badge.unlock_rule?.type === "streak"
+                      ? `${t.adminBadges.streakMetric}: ${badge.unlock_rule?.value} days`
+                      : `${t.adminBadges.levelMetric}: Level ${badge.unlock_rule?.value}`
+                    }
+                  </span>
                 </div>
               </div>
             </div>

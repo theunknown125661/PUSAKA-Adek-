@@ -8,8 +8,14 @@ import { Gift, Loader2, Save, History, TrendingUp, Wallet } from "lucide-react";
 import { EmptyState } from "@/components/shared/empty-state";
 import type { WalletTransaction } from "@/lib/types/database";
 
-type AuditTransaction = WalletTransaction & {
-  wallets?: { student_id: string; profiles?: { full_name: string } };
+type AuditTransaction = {
+  id: string;
+  user_id: string;
+  amount: number;
+  event_type: string;
+  note: string;
+  created_at: string;
+  profiles?: { full_name: string } | null;
 };
 
 interface RulesConfig {
@@ -36,15 +42,30 @@ export default function RewardsAdminPage() {
     const supabase = createClient();
     async function load() {
       const [rRes, tRes] = await Promise.all([
-        supabase.from("reward_rules").select("*").limit(1).single(),
+        supabase.from("reward_rules").select("*").limit(1).maybeSingle(),
         supabase.from("wallet_transactions")
-          .select("*, wallets!inner(student_id, profiles!inner(full_name))")
+          .select("*, profiles(full_name)")
           .order("created_at", { ascending: false })
           .limit(50),
       ]);
       
-      if (rRes.data) setRules(rRes.data as RulesConfig);
-      if (tRes.data) setTransactions(tRes.data as AuditTransaction[]);
+      if (rRes.data) {
+        setRules(rRes.data as RulesConfig);
+      } else {
+        // Fallback default rules
+        setRules({
+          id: "",
+          base_reward: 5000,
+          early_bonus: 2000,
+          monthly_hold_bonus_pct: 5,
+          attendance_start_time: "06:00",
+          attendance_end_time: "09:00",
+          early_cutoff_time: "07:00",
+          min_withdrawal_amount: 10000,
+          economy_config: {}
+        });
+      }
+      if (tRes.data) setTransactions(tRes.data as any[]);
       setLoading(false);
     }
     load();
@@ -56,19 +77,53 @@ export default function RewardsAdminPage() {
     setMsg("");
     const supabase = createClient();
     
-    const { error } = await supabase
-      .from("reward_rules")
-      .update({ 
-        base_reward: rules.base_reward, 
-        early_bonus: rules.early_bonus, 
-        monthly_hold_bonus_pct: rules.monthly_hold_bonus_pct, 
-        attendance_start_time: rules.attendance_start_time, 
-        attendance_end_time: rules.attendance_end_time, 
-        early_cutoff_time: rules.early_cutoff_time, 
-        min_withdrawal_amount: rules.min_withdrawal_amount,
-        economy_config: rules.economy_config
-      })
-      .eq("id", rules.id);
+    let error;
+    if (!rules.id) {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: profile } = await supabase.from("profiles").select("school_id").eq("id", user?.id).single();
+      const schoolId = profile?.school_id;
+      if (!schoolId) {
+        setMsg("Error: Admin profile does not have a school assigned.");
+        setSaving(false);
+        return;
+      }
+      
+      const { data, error: insertError } = await supabase
+        .from("reward_rules")
+        .insert({ 
+          school_id: schoolId,
+          base_reward: rules.base_reward, 
+          early_bonus: rules.early_bonus, 
+          monthly_hold_bonus_pct: rules.monthly_hold_bonus_pct, 
+          attendance_start_time: rules.attendance_start_time, 
+          attendance_end_time: rules.attendance_end_time, 
+          early_cutoff_time: rules.early_cutoff_time, 
+          min_withdrawal_amount: rules.min_withdrawal_amount,
+          economy_config: rules.economy_config
+        })
+        .select()
+        .single();
+      
+      error = insertError;
+      if (data) {
+        setRules(data as RulesConfig);
+      }
+    } else {
+      const { error: updateError } = await supabase
+        .from("reward_rules")
+        .update({ 
+          base_reward: rules.base_reward, 
+          early_bonus: rules.early_bonus, 
+          monthly_hold_bonus_pct: rules.monthly_hold_bonus_pct, 
+          attendance_start_time: rules.attendance_start_time, 
+          attendance_end_time: rules.attendance_end_time, 
+          early_cutoff_time: rules.early_cutoff_time, 
+          min_withdrawal_amount: rules.min_withdrawal_amount,
+          economy_config: rules.economy_config
+        })
+        .eq("id", rules.id);
+      error = updateError;
+    }
       
     if (error) setMsg(t.adminRewards.errorSaving);
     else setMsg(t.adminRewards.successSaving);
@@ -92,12 +147,13 @@ export default function RewardsAdminPage() {
       // Reload transactions
       const { data } = await supabase
           .from("wallet_transactions")
-          .select("*, wallets!inner(student_id, profiles!inner(full_name))")
+          .select("*, wallets!inner(user_id, profiles!inner(full_name))")
           .order("created_at", { ascending: false })
           .limit(50);
       if (data) setTransactions(data as AuditTransaction[]);
     }
     setSaving(false);
+    setTimeout(() => setMsg(""), 3000);
   };
 
   if (!isClient || loading) return <div className="flex items-center justify-center py-20"><div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
@@ -214,16 +270,16 @@ export default function RewardsAdminPage() {
                 <div key={tx.id} className="bg-card/50 rounded-xl p-3 border border-border">
                   <div className="flex items-start justify-between">
                     <div>
-                      <p className="text-sm font-medium">{tx.wallets?.profiles?.full_name || "Unknown"}</p>
-                      <p className="text-xs text-muted-foreground">{tx.description}</p>
+                      <p className="text-sm font-medium">{tx.profiles?.full_name || "Unknown"}</p>
+                      <p className="text-xs text-muted-foreground">{tx.note || "No notes"}</p>
                     </div>
                     <div className="text-right">
                       <p className={`text-sm font-bold ${
-                        tx.type === "withdrawal" || tx.type === "hold_lock" ? "text-red-500" : "text-emerald-500"
+                        tx.amount < 0 ? "text-red-500" : "text-emerald-500"
                       }`}>
-                        {tx.type === "withdrawal" || tx.type === "hold_lock" ? "-" : "+"}{formatCurrency(tx.amount)}
+                        {tx.amount < 0 ? "-" : "+"}{formatCurrency(Math.abs(tx.amount))}
                       </p>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{tx.type.replace(/_/g, ' ')}</p>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{(tx.event_type || "").replace(/_/g, ' ')}</p>
                     </div>
                   </div>
                   <div className="mt-2 text-[10px] text-muted-foreground border-t border-border/50 pt-2 flex justify-between">

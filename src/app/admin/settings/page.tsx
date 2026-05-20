@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Settings, Loader2, Save, MapPin, ShieldAlert, Coins, User } from "lucide-react";
 import { useTranslation } from "@/lib/i18n/use-translation";
+import { toast } from "sonner";
 
 import dynamic from "next/dynamic";
 
@@ -24,6 +25,7 @@ export default function AdminSettingsPage() {
   const [profile, setProfile] = useState<any>(null);
   const [fullName, setFullName] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarMode, setAvatarMode] = useState<"upload" | "initials">("initials");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(true);
@@ -50,6 +52,7 @@ export default function AdminSettingsPage() {
           setProfile(pData);
           setFullName(pData.full_name || "");
           setAvatarUrl(pData.avatar_url);
+          setAvatarMode(pData.avatar_mode || "initials");
         }
       }
       setLoading(false);
@@ -69,8 +72,7 @@ export default function AdminSettingsPage() {
         name: school.name, 
         latitude: school.latitude, 
         longitude: school.longitude, 
-        radius_m: school.radius_m,
-        economy_config: school.economy_config
+        radius_m: school.radius_m
       })
       .eq("id", school.id);
       
@@ -91,12 +93,16 @@ export default function AdminSettingsPage() {
       .from("profiles")
       .update({ 
         full_name: fullName,
-        avatar_url: avatarUrl
+        avatar_url: avatarUrl,
+        avatar_mode: avatarMode
       })
       .eq("id", profile.id);
       
     if (error) setProfileMsg(interpolate(t.adminSettings.errorSavingProfile, { message: error.message }));
-    else setProfileMsg(t.adminSettings.successSavingProfile);
+    else {
+      setProfileMsg(t.adminSettings.successSavingProfile);
+      window.dispatchEvent(new Event("profile-updated"));
+    }
     
     setSavingProfile(false);
     setTimeout(() => setProfileMsg(""), 3000);
@@ -165,8 +171,26 @@ export default function AdminSettingsPage() {
               <AvatarUpload 
                 userId={profile.id}
                 currentUrl={avatarUrl}
-                onUploaded={(url) => setAvatarUrl(url)}
-                onRemoved={() => setAvatarUrl(null)}
+                onUploaded={async (url) => {
+                  setAvatarUrl(url);
+                  setAvatarMode("upload");
+                  const supabase = createClient();
+                  await supabase.from("profiles").update({ 
+                    avatar_url: url, 
+                    avatar_mode: "upload" 
+                  }).eq("id", profile.id);
+                  window.dispatchEvent(new Event("profile-updated"));
+                }}
+                onRemoved={async () => {
+                  setAvatarUrl(null);
+                  setAvatarMode("initials");
+                  const supabase = createClient();
+                  await supabase.from("profiles").update({ 
+                    avatar_url: null, 
+                    avatar_mode: "initials" 
+                  }).eq("id", profile.id);
+                  window.dispatchEvent(new Event("profile-updated"));
+                }}
               />
 
               {field(t.adminSettings.fullName, fullName, (v) => setFullName(v))}
@@ -203,6 +227,45 @@ export default function AdminSettingsPage() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {!school && (
+        <div className="glass rounded-2xl p-6 text-center space-y-4">
+          <MapPin className="h-10 w-10 text-primary mx-auto animate-bounce" />
+          <h2 className="text-lg font-bold">No School Configuration Found</h2>
+          <p className="text-sm text-muted-foreground max-w-md mx-auto">
+            You must create a school configuration with coordinates and geofencing radius before students can check in.
+          </p>
+          <button
+            onClick={async () => {
+              setSaving(true);
+              const supabase = createClient();
+              const { data, error } = await supabase
+                .from("schools")
+                .insert({
+                  name: "SMK Negeri 1 Jakarta",
+                  latitude: -6.2088,
+                  longitude: 106.8456,
+                  radius_m: 200
+                })
+                .select()
+                .single();
+              
+              if (error) {
+                toast.error("Failed to create school: " + error.message);
+              } else {
+                setSchool(data as SchoolConfig);
+                toast.success("School configuration created! Please update coordinates and details.");
+              }
+              setSaving(false);
+            }}
+            disabled={saving}
+            className="px-5 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
+            Initialize School Configuration
+          </button>
         </div>
       )}
 
@@ -244,12 +307,14 @@ export default function AdminSettingsPage() {
         </div>
       )}
 
-      <div className="flex items-center gap-4 pt-2">
-        <button onClick={handleSave} disabled={saving} className="px-6 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm disabled:opacity-50 flex items-center gap-2 hover:bg-primary/90 transition-colors">
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {saving ? t.adminSettings.saving : t.adminSettings.saveConfig}
-        </button>
-        {msg && <p className={`text-sm font-medium ${msg.includes("Error") ? "text-destructive" : "text-emerald-500"}`}>{msg}</p>}
-      </div>
+      {school && (
+        <div className="flex items-center gap-4 pt-2">
+          <button onClick={handleSave} disabled={saving} className="px-6 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm disabled:opacity-50 flex items-center gap-2 hover:bg-primary/90 transition-colors">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {saving ? t.adminSettings.saving : t.adminSettings.saveConfig}
+          </button>
+          {msg && <p className={`text-sm font-medium ${msg.includes("Error") ? "text-destructive" : "text-emerald-500"}`}>{msg}</p>}
+        </div>
+      )}
     </div>
   );
 }

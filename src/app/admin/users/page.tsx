@@ -26,7 +26,25 @@ export default function UserManagementPage() {
   const [editFullName, setEditFullName] = useState("");
   const [editUsername, setEditUsername] = useState("");
   const [editBio, setEditBio] = useState("");
+  const [editRole, setEditRole] = useState("student");
   const [updatingProfile, setUpdatingProfile] = useState(false);
+
+  // New admin management states
+  const [showResetPasswordModal, setShowResetPasswordModal] = useState(false);
+  const [newPasswordVal, setNewPasswordVal] = useState("");
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+
+  const [showAdjustWalletModal, setShowAdjustWalletModal] = useState(false);
+  const [adjustCurrencyType, setAdjustCurrencyType] = useState("COIN");
+  const [adjustAvailable, setAdjustAvailable] = useState(0);
+  const [adjustPending, setAdjustPending] = useState(0);
+  const [adjustHeld, setAdjustHeld] = useState(0);
+  const [adjustReason, setAdjustReason] = useState("");
+  const [isAdjustingWallet, setIsAdjustingWallet] = useState(false);
+  const [isDeletingUser, setIsDeletingUser] = useState(false);
+  const [allClasses, setAllClasses] = useState<{ id: string; name: string }[]>([]);
+  const [selectedClassId, setSelectedClassId] = useState<string>("");
+  const [updatingEnrollment, setUpdatingEnrollment] = useState(false);
 
   // Modal state for adding a user
   const [showAddModal, setShowAddModal] = useState(false);
@@ -54,6 +72,15 @@ export default function UserManagementPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterRole]);
 
+  useEffect(() => {
+    async function loadAllClasses() {
+      const supabase = createClient();
+      const { data } = await supabase.from("classes").select("id, name").order("name");
+      if (data) setAllClasses(data);
+    }
+    loadAllClasses();
+  }, []);
+
   // Load detailed profile parameters when clicked
   const handleViewDetails = async (user: Profile) => {
     setSelectedUser(user);
@@ -61,6 +88,7 @@ export default function UserManagementPage() {
     setEditFullName(user.full_name || "");
     setEditUsername((user as any).username || "");
     setEditBio((user as any).bio || "");
+    setEditRole(user.role || "student");
     
     if (user.role !== "student") return; // Details like wallets/badges are only for students
 
@@ -68,12 +96,11 @@ export default function UserManagementPage() {
     try {
       const supabase = createClient();
 
-      // 1. Fetch Student's Wallet
-      const { data: wallet } = await supabase
+      // 1. Fetch Student's Wallets
+      const { data: wallets } = await supabase
         .from("wallets")
         .select("*")
-        .eq("student_id", user.id)
-        .single();
+        .eq("user_id", user.id);
 
       // 2. Fetch Class Enrollment
       const { data: enrollment } = await supabase
@@ -90,26 +117,124 @@ export default function UserManagementPage() {
 
       // 3. Fetch Earned Badges
       const { data: studentBadges } = await supabase
-        .from("student_badges")
+        .from("user_badges")
         .select(`
-          earned_at,
+          unlocked_at,
           badges (
             name,
             description,
             icon
           )
         `)
-        .eq("student_id", user.id);
+        .eq("user_id", user.id);
+
+      const coinWallet = wallets?.find(w => w.currency_type === "COIN") || { balance_available: 0, balance_pending: 0, balance_locked: 0 };
+      const rupiahWallet = wallets?.find(w => w.currency_type === "RUPIAH") || { balance_available: 0, balance_pending: 0, balance_locked: 0 };
 
       setUserDetails({
-        wallet: wallet || { available_balance: 0, pending_balance: 0, held_balance: 0 },
+        wallets: wallets || [],
+        coinWallet,
+        rupiahWallet,
         class: (enrollment as any)?.classes || null,
+        class_id: (enrollment as any)?.class_id || "",
+        enrollment_id: (enrollment as any)?.id || "",
         badges: studentBadges || []
       });
+      setSelectedClassId((enrollment as any)?.class_id || "");
     } catch (err) {
       console.error("Error loading student profile details:", err);
     } finally {
       setLoadingDetails(false);
+    }
+  };
+
+  const handleClassChange = async (newClassId: string) => {
+    if (!selectedUser) return;
+    setUpdatingEnrollment(true);
+    try {
+      const supabase = createClient();
+      
+      if (!newClassId) {
+        // Delete enrollment
+        const { error } = await supabase
+          .from("enrollments")
+          .delete()
+          .eq("student_id", selectedUser.id);
+          
+        if (error) {
+          toast.error("Failed to unassign class: " + error.message);
+        } else {
+          toast.success("Student successfully unassigned from class");
+          setSelectedClassId("");
+          if (userDetails) {
+            setUserDetails({
+              ...userDetails,
+              class: null,
+              class_id: "",
+              enrollment_id: ""
+            });
+          }
+        }
+      } else {
+        // Upsert enrollment
+        const { data: existing } = await supabase
+          .from("enrollments")
+          .select("id")
+          .eq("student_id", selectedUser.id)
+          .maybeSingle();
+
+        if (existing) {
+          const { error } = await supabase
+            .from("enrollments")
+            .update({ class_id: newClassId })
+            .eq("student_id", selectedUser.id);
+            
+          if (error) {
+            toast.error("Failed to update class enrollment: " + error.message);
+          } else {
+            toast.success("Class enrollment updated successfully!");
+            setSelectedClassId(newClassId);
+            const { data: cls } = await supabase.from("classes").select("name, grade_level").eq("id", newClassId).single();
+            if (userDetails) {
+              setUserDetails({
+                ...userDetails,
+                class: cls,
+                class_id: newClassId
+              });
+            }
+          }
+        } else {
+          const { data: newEnr, error } = await supabase
+            .from("enrollments")
+            .insert({
+              student_id: selectedUser.id,
+              class_id: newClassId
+            })
+            .select()
+            .single();
+            
+          if (error) {
+            toast.error("Failed to enroll student: " + error.message);
+          } else {
+            toast.success("Student enrolled in class successfully!");
+            setSelectedClassId(newClassId);
+            const { data: cls } = await supabase.from("classes").select("name, grade_level").eq("id", newClassId).single();
+            if (userDetails) {
+              setUserDetails({
+                ...userDetails,
+                class: cls,
+                class_id: newClassId,
+                enrollment_id: newEnr.id
+              });
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("An unexpected error occurred during assignment.");
+    } finally {
+      setUpdatingEnrollment(false);
     }
   };
 
@@ -123,7 +248,8 @@ export default function UserManagementPage() {
       .update({ 
         full_name: editFullName, 
         username: editUsername, 
-        bio: editBio 
+        bio: editBio,
+        role: editRole
       })
       .eq("id", selectedUser.id);
       
@@ -132,8 +258,8 @@ export default function UserManagementPage() {
     } else {
       toast.success(t.adminUsers.successUpdating);
       // Update local state in list
-      setUsers(users.map(u => u.id === selectedUser.id ? { ...u, full_name: editFullName, username: editUsername, bio: editBio } : u));
-      setSelectedUser({ ...selectedUser, full_name: editFullName, username: editUsername, bio: editBio } as Profile);
+      setUsers(users.map(u => u.id === selectedUser.id ? { ...u, full_name: editFullName, username: editUsername, bio: editBio, role: editRole as any } : u));
+      setSelectedUser({ ...selectedUser, full_name: editFullName, username: editUsername, bio: editBio, role: editRole as any } as Profile);
     }
     setUpdatingProfile(false);
   };
@@ -440,6 +566,18 @@ export default function UserManagementPage() {
                       className="w-full px-3 py-2 rounded-lg bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 h-20 resize-none"
                     />
                   </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">User Role</label>
+                    <select
+                      value={editRole}
+                      onChange={(e) => setEditRole(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+                    >
+                      <option value="student">Student</option>
+                      <option value="teacher">Teacher</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </div>
                   
                   <button 
                     onClick={handleUpdateProfile}
@@ -464,49 +602,97 @@ export default function UserManagementPage() {
                     <div className="space-y-6">
                       
                       {/* Academic Class Card */}
-                      <div className="glass rounded-2xl p-4 space-y-3">
-                        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                          <School className="h-3.5 w-3.5 text-primary" /> {t.adminUsers.classEnrollment}
-                        </h3>
-                        {userDetails.class ? (
-                          <div className="flex justify-between items-center bg-muted/40 p-3 rounded-xl border border-border/40">
-                            <div>
-                              <p className="text-sm font-semibold">{userDetails.class.name}</p>
-                              <p className="text-xs text-muted-foreground">{interpolate(t.adminUsers.gradeLevel, { level: userDetails.class.grade_level })}</p>
-                            </div>
-                            <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 rounded-full uppercase tracking-wide">
-                              {t.adminUsers.enrolled}
-                            </span>
-                          </div>
-                        ) : (
-                          <p className="text-xs text-muted-foreground italic p-2 bg-muted/20 rounded-lg">{t.adminUsers.noClass}</p>
-                        )}
+                      <div className="glass rounded-2xl p-4 space-y-3 border border-border/40">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                            <School className="h-3.5 w-3.5 text-primary" /> {t.adminUsers.classEnrollment}
+                          </h3>
+                          {updatingEnrollment && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />}
+                        </div>
+                        
+                        <div className="space-y-2">
+                          <select
+                            value={selectedClassId}
+                            onChange={(e) => handleClassChange(e.target.value)}
+                            disabled={updatingEnrollment}
+                            className="w-full px-3 py-2.5 rounded-xl bg-muted border border-border text-xs font-medium focus:outline-none focus:ring-2 focus:ring-primary/20"
+                          >
+                            <option value="">-- Unassigned / No Class --</option>
+                            {allClasses.map((cls) => (
+                              <option key={cls.id} value={cls.id}>
+                                {cls.name}
+                              </option>
+                            ))}
+                          </select>
+                          
+                          {selectedClassId ? (
+                            <p className="text-[10px] text-emerald-500 font-semibold px-1">
+                              ✓ Enrolled. Student receives active attendance prompts.
+                            </p>
+                          ) : (
+                            <p className="text-[10px] text-amber-500 font-semibold px-1">
+                              ⚠ Unassigned. Student won't see active check-in prompts.
+                            </p>
+                          )}
+                        </div>
                       </div>
 
                       {/* Wallet Balance Cards */}
-                      <div className="glass rounded-2xl p-4 space-y-3">
-                        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                          <Wallet className="h-3.5 w-3.5 text-primary" /> {t.adminUsers.financialWallet}
-                        </h3>
-                        
-                        <div className="grid grid-cols-2 gap-2">
-                           <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-xl p-3">
-                            <p className="text-[10px] text-muted-foreground uppercase font-semibold">{t.adminUsers.available}</p>
-                            <p className="text-sm font-bold text-emerald-500 mt-1">
-                              {formatRupiah(userDetails.wallet.available_balance)}
-                            </p>
+                      <div className="glass rounded-2xl p-4 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                            <Wallet className="h-3.5 w-3.5 text-primary" /> Wallets
+                          </h3>
+                          <button
+                            onClick={() => {
+                              setAdjustCurrencyType("COIN");
+                              setAdjustAvailable(userDetails.coinWallet.balance_available);
+                              setAdjustPending(userDetails.coinWallet.balance_pending);
+                              setAdjustHeld(userDetails.coinWallet.balance_locked);
+                              setAdjustReason("");
+                              setShowAdjustWalletModal(true);
+                            }}
+                            className="text-xs font-semibold text-primary hover:underline"
+                          >
+                            Adjust Balance
+                          </button>
+                        </div>
+
+                        {/* Coin Wallet */}
+                        <div className="space-y-2">
+                          <p className="text-xs font-semibold text-muted-foreground">🪙 Coin Wallet</p>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-xl p-2.5">
+                              <p className="text-[9px] text-muted-foreground uppercase font-semibold">Available</p>
+                              <p className="text-xs font-bold text-emerald-500 mt-0.5">{userDetails.coinWallet.balance_available}</p>
+                            </div>
+                            <div className="bg-primary/5 border border-primary/10 rounded-xl p-2.5">
+                              <p className="text-[9px] text-muted-foreground uppercase font-semibold">Pending</p>
+                              <p className="text-xs font-bold text-primary mt-0.5">{userDetails.coinWallet.balance_pending}</p>
+                            </div>
+                            <div className="bg-amber-500/5 border border-amber-500/10 rounded-xl p-2.5">
+                              <p className="text-[9px] text-muted-foreground uppercase font-semibold">Locked</p>
+                              <p className="text-xs font-bold text-amber-500 mt-0.5">{userDetails.coinWallet.balance_locked}</p>
+                            </div>
                           </div>
-                          <div className="bg-primary/5 border border-primary/10 rounded-xl p-3">
-                            <p className="text-[10px] text-muted-foreground uppercase font-semibold">{t.adminUsers.pending}</p>
-                            <p className="text-sm font-bold text-primary mt-1">
-                              {formatRupiah(userDetails.wallet.pending_balance)}
-                            </p>
-                          </div>
-                          <div className="bg-amber-500/5 border border-amber-500/10 rounded-xl p-3 col-span-2">
-                            <p className="text-[10px] text-muted-foreground uppercase font-semibold">{t.adminUsers.monthlyHeld}</p>
-                            <p className="text-sm font-bold text-amber-500 mt-1">
-                              {formatRupiah(userDetails.wallet.held_balance)}
-                            </p>
+                        </div>
+
+                        {/* Rupiah Wallet */}
+                        <div className="space-y-2">
+                          <p className="text-xs font-semibold text-muted-foreground">💵 Rupiah Wallet</p>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-xl p-2.5">
+                              <p className="text-[9px] text-muted-foreground uppercase font-semibold">Available</p>
+                              <p className="text-xs font-bold text-emerald-500 mt-0.5">{formatRupiah(userDetails.rupiahWallet.balance_available)}</p>
+                            </div>
+                            <div className="bg-primary/5 border border-primary/10 rounded-xl p-2.5">
+                              <p className="text-[9px] text-muted-foreground uppercase font-semibold">Pending</p>
+                              <p className="text-xs font-bold text-primary mt-0.5">{formatRupiah(userDetails.rupiahWallet.balance_pending)}</p>
+                            </div>
+                            <div className="bg-amber-500/5 border border-amber-500/10 rounded-xl p-2.5">
+                              <p className="text-[9px] text-muted-foreground uppercase font-semibold">Locked</p>
+                              <p className="text-xs font-bold text-amber-500 mt-0.5">{formatRupiah(userDetails.rupiahWallet.balance_locked)}</p>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -548,9 +734,223 @@ export default function UserManagementPage() {
                       </p>
                     </div>
                   )}
+
+                  {/* Danger Zone */}
+                  <div className="glass rounded-2xl p-4 space-y-3 border-destructive/20 bg-destructive/5 mt-6">
+                    <h3 className="text-xs font-semibold text-destructive uppercase tracking-wider">Admin Danger Zone</h3>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => {
+                          setNewPasswordVal("");
+                          setShowResetPasswordModal(true);
+                        }}
+                        className="py-2 text-xs font-semibold rounded-xl bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border"
+                      >
+                        Reset Password
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (confirm(`Are you absolutely sure you want to permanently delete user ${selectedUser.full_name}? This will remove all their auth credentials, attendance logs, wallet data, and profile. THIS ACTION CANNOT BE UNDONE.`)) {
+                            setIsDeletingUser(true);
+                            try {
+                              const res = await fetch("/api/admin/delete-user", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ userId: selectedUser.id })
+                              });
+                              const data = await res.json();
+                              if (!res.ok) {
+                                toast.error(data.error || "Failed to delete user");
+                              } else {
+                                toast.success("User successfully deleted");
+                                setSelectedUser(null);
+                                loadUsers();
+                              }
+                            } catch (e) {
+                              toast.error("An unexpected error occurred");
+                            } finally {
+                              setIsDeletingUser(false);
+                            }
+                          }
+                        }}
+                        disabled={isDeletingUser}
+                        className="py-2 text-xs font-semibold rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
+                      >
+                        {isDeletingUser ? "Deleting..." : "Delete Account"}
+                      </button>
+                    </div>
+                  </div>
                 </>
               )}
 
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Password Modal */}
+      {showResetPasswordModal && selectedUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
+          <div className="bg-card border border-border w-full max-w-md rounded-2xl shadow-xl overflow-hidden animate-fade-in">
+            <div className="px-6 py-4 border-b border-border flex justify-between items-center bg-muted/50">
+              <h2 className="font-bold text-lg">Reset Password</h2>
+              <button onClick={() => setShowResetPasswordModal(false)} className="text-muted-foreground hover:text-foreground">✕</button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-muted-foreground">Change password for <b>{selectedUser.full_name}</b> ({selectedUser.email}).</p>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">New Password</label>
+                <input
+                  type="password"
+                  minLength={6}
+                  value={newPasswordVal}
+                  onChange={(e) => setNewPasswordVal(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  placeholder="Min 6 characters"
+                />
+              </div>
+              <button
+                onClick={async () => {
+                  if (newPasswordVal.length < 6) {
+                    toast.error("Password must be at least 6 characters");
+                    return;
+                  }
+                  setIsResettingPassword(true);
+                  try {
+                    const res = await fetch("/api/admin/reset-password", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ userId: selectedUser.id, newPassword: newPasswordVal })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                      toast.error(data.error || "Failed to reset password");
+                    } else {
+                      toast.success("Password successfully reset");
+                      setShowResetPasswordModal(false);
+                    }
+                  } catch (e) {
+                    toast.error("An unexpected error occurred");
+                  } finally {
+                    setIsResettingPassword(false);
+                  }
+                }}
+                disabled={isResettingPassword}
+                className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm disabled:opacity-50"
+              >
+                {isResettingPassword ? "Saving..." : "Change Password"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Adjust Wallet Modal */}
+      {showAdjustWalletModal && selectedUser && userDetails && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
+          <div className="bg-card border border-border w-full max-w-md rounded-2xl shadow-xl overflow-hidden animate-fade-in">
+            <div className="px-6 py-4 border-b border-border flex justify-between items-center bg-muted/50">
+              <h2 className="font-bold text-lg">Adjust Wallet Balance</h2>
+              <button onClick={() => setShowAdjustWalletModal(false)} className="text-muted-foreground hover:text-foreground">✕</button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-muted-foreground font-medium">Adjusting balances for <b>{selectedUser.full_name}</b>.</p>
+
+              <div>
+                <label className="block text-xs font-semibold text-muted-foreground mb-1.5">Currency Type</label>
+                <select
+                  value={adjustCurrencyType}
+                  onChange={(e) => {
+                    const newType = e.target.value;
+                    setAdjustCurrencyType(newType);
+                    const wallet = newType === "COIN" ? userDetails.coinWallet : userDetails.rupiahWallet;
+                    setAdjustAvailable(wallet.balance_available);
+                    setAdjustPending(wallet.balance_pending);
+                    setAdjustHeld(wallet.balance_locked);
+                  }}
+                  className="w-full px-3 py-2 rounded-xl bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+                >
+                  <option value="COIN">🪙 COIN</option>
+                  <option value="RUPIAH">💵 RUPIAH (IDR)</option>
+                </select>
+              </div>
+              
+              <div className="space-y-3.5">
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Available Balance</label>
+                  <input
+                    type="number"
+                    value={adjustAvailable}
+                    onChange={(e) => setAdjustAvailable(parseInt(e.target.value) || 0)}
+                    className="w-full px-3 py-2 rounded-xl bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Pending Balance</label>
+                  <input
+                    type="number"
+                    value={adjustPending}
+                    onChange={(e) => setAdjustPending(parseInt(e.target.value) || 0)}
+                    className="w-full px-3 py-2 rounded-xl bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Locked Balance</label>
+                  <input
+                    type="number"
+                    value={adjustHeld}
+                    onChange={(e) => setAdjustHeld(parseInt(e.target.value) || 0)}
+                    className="w-full px-3 py-2 rounded-xl bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Reason / Description</label>
+                  <input
+                    type="text"
+                    value={adjustReason}
+                    onChange={(e) => setAdjustReason(e.target.value)}
+                    placeholder="e.g. Corrected manual check-in bonus"
+                    className="w-full px-3 py-2 rounded-xl bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  />
+                </div>
+              </div>
+
+              <button
+                onClick={async () => {
+                  setIsAdjustingWallet(true);
+                  try {
+                    const res = await fetch("/api/admin/adjust-wallet", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        studentId: selectedUser.id,
+                        currencyType: adjustCurrencyType,
+                        available: adjustAvailable,
+                        pending: adjustPending,
+                        locked: adjustHeld,
+                        reason: adjustReason
+                      })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                      toast.error(data.error || "Failed to adjust balance");
+                    } else {
+                      toast.success("Wallet successfully adjusted");
+                      setShowAdjustWalletModal(false);
+                      // Reload details
+                      handleViewDetails(selectedUser);
+                    }
+                  } catch (e) {
+                    toast.error("An unexpected error occurred");
+                  } finally {
+                    setIsAdjustingWallet(false);
+                  }
+                }}
+                disabled={isAdjustingWallet}
+                className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm disabled:opacity-50"
+              >
+                {isAdjustingWallet ? "Saving..." : "Save Balances"}
+              </button>
             </div>
           </div>
         </div>

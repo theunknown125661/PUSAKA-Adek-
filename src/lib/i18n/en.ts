@@ -622,6 +622,7 @@ export const en: Messages = {
     history: "History",
     wallet: "Wallet",
     profile: "Profile",
+    myClass: "My Class",
     myClasses: "My Classes",
     students: "Students",
     reviews: "Reviews",

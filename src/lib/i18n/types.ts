@@ -637,6 +637,7 @@ export interface Messages {
     history: string;
     wallet: string;
     profile: string;
+    myClass: string;
     myClasses: string;
     students: string;
     reviews: string;
