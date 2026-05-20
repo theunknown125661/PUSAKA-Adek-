@@ -226,7 +226,7 @@ BEGIN
       WHERE id = NEW.student_id;
 
     -- If status is 'pending' (waiting for teacher review)
-    ELSIF NEW.status = 'pending' THEN
+    ELSIF NEW.status = 'pending_teacher_view' THEN
       -- Insert Rupiah as PENDING
       INSERT INTO public.wallet_transactions (wallet_id, user_id, event_type, event_id, amount, currency_type, state, note)
       VALUES (v_rupiah_wallet_id, NEW.student_id, 'attendance', NEW.id::text, v_rupiah_reward, 'RUPIAH', 'PENDING', 'Attendance Rupiah pending teacher verification');

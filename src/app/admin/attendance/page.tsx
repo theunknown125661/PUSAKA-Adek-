@@ -61,20 +61,8 @@ export default function AttendanceReviewPage() {
       });
       if (reviewError) throw reviewError;
 
-      // If approved, credit wallet
-      if (action === "approved") {
-        const log = logs.find((l) => l.id === logId);
-        if (log) {
-          const { data: rules, error: rulesError } = await supabase.from("reward_rules").select("base_reward, early_bonus").eq("school_id", log.school_id).single();
-          if (rulesError && rulesError.code !== 'PGRST116') throw rulesError;
-          if (rules) {
-            let reward = rules.base_reward;
-            if (log.before_early_cutoff) reward += rules.early_bonus;
-            const { error: rpcError } = await supabase.rpc("credit_wallet", { p_student_id: log.student_id, p_amount: reward, p_description: `Attendance reward ${formatDate(log.attendance_date)}`, p_reference_id: logId });
-            if (rpcError) throw rpcError;
-          }
-        }
-      }
+      // Wallet crediting is handled automatically by the 
+      // process_attendance_economy_v2() database trigger when status changes to 'approved'
 
       setLogs((prev) => prev.filter((l) => l.id !== logId));
       setSuccessMsg(interpolate(t.adminAttendance.successMessage, { action: action === 'approved' ? t.admin.approvedAction : t.admin.rejectedAction }));

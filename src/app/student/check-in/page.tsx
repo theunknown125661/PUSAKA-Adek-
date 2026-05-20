@@ -28,7 +28,7 @@ export default function CheckInPage() {
   const { videoRef, preview, blob, active, initializing, error: camError, open, capture, retake, close } = useCamera();
   const router = useRouter();
 
-  const [school, setSchool] = useState<{ latitude: number; longitude: number; radius_m: number } | null>(null);
+  const [school, setSchool] = useState<{ latitude: number; longitude: number; radius_m: number; accuracy_tolerance_m?: number } | null>(null);
   const [enrollment, setEnrollment] = useState<{ class_id: string; school_id: string } | null>(null);
   const [rewardRules, setRewardRules] = useState<{ attendance_start_time: string; attendance_end_time: string; early_cutoff_time: string; base_reward: number; early_bonus: number } | null>(null);
   
@@ -53,7 +53,7 @@ export default function CheckInPage() {
       setEnrollment({ class_id: enr.class_id, school_id: schoolId });
 
       const [schoolRes, rulesRes, todayRes] = await Promise.all([
-        supabase.from("schools").select("latitude, longitude, radius_m").eq("id", schoolId).single(),
+        supabase.from("schools").select("latitude, longitude, radius_m, accuracy_tolerance_m").eq("id", schoolId).single(),
         supabase.from("reward_rules").select("*").eq("school_id", schoolId).single(),
         supabase.from("attendance_logs").select("id").eq("student_id", profile!.id).eq("attendance_date", new Date().toISOString().split("T")[0]).limit(1),
       ]);
@@ -111,8 +111,9 @@ export default function CheckInPage() {
 
   const getAccuracyStatus = (): RequirementStatus => {
     if (!position) return "pending";
-    if (position.accuracy > 100) return "blocked";
-    if (position.accuracy > 50) return "warning";
+    const tol = school?.accuracy_tolerance_m || 100;
+    if (position.accuracy > tol) return "blocked";
+    if (position.accuracy > (tol / 2)) return "warning";
     return "complete";
   };
 
@@ -154,13 +155,17 @@ export default function CheckInPage() {
     try {
       const fileName = `${profile.id}/${Date.now()}.jpg`;
       const { error: uploadErr } = await supabase.storage.from("attendance-selfies").upload(fileName, blob, { contentType: "image/jpeg" });
-      if (uploadErr) throw uploadErr;
+      if (uploadErr) {
+        console.error("Upload error:", uploadErr);
+        throw new Error("Selfie upload failed: " + uploadErr.message);
+      }
 
       const { data: urlData } = supabase.storage.from("attendance-selfies").getPublicUrl(fileName);
       const flags = detectFraudFlags({
         distanceM: distance || 0,
         radiusM: school?.radius_m || 200,
         accuracyM: position.accuracy,
+        accuracyToleranceM: school?.accuracy_tolerance_m || 100,
         withinTimeWindow: isInTimeWindow(),
         hasSelfie: true,
         hasExistingToday: false,
@@ -184,7 +189,10 @@ export default function CheckInPage() {
         fraud_flags: flags.length > 0 ? flags : null,
         device_info: navigator.userAgent.substring(0, 200),
       });
-      if (insertErr) throw insertErr;
+      if (insertErr) {
+        console.error("Insert error:", JSON.stringify(insertErr, null, 2), insertErr);
+        throw new Error("Database insert failed: " + (insertErr.message || JSON.stringify(insertErr)));
+      }
 
       setSubmitState("success");
       toast.success(t.checkin.submit.success);

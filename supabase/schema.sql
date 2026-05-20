@@ -74,6 +74,7 @@ CREATE TABLE public.schools (
   latitude DOUBLE PRECISION NOT NULL,
   longitude DOUBLE PRECISION NOT NULL,
   radius_m INTEGER NOT NULL DEFAULT 200,
+  accuracy_tolerance_m INTEGER NOT NULL DEFAULT 100,
   timezone TEXT DEFAULT 'Asia/Jakarta',
   created_at TIMESTAMPTZ DEFAULT now()
 );

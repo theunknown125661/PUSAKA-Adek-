@@ -10,6 +10,7 @@ export interface FraudCheckInput {
   distanceM: number;
   radiusM: number;
   accuracyM: number;
+  accuracyToleranceM?: number;
   withinTimeWindow: boolean;
   hasSelfie: boolean;
   hasExistingToday: boolean;
@@ -19,7 +20,7 @@ export interface FraudCheckInput {
 export function detectFraudFlags(input: FraudCheckInput): FraudFlag[] {
   const flags: FraudFlag[] = [];
   if (input.distanceM > input.radiusM) flags.push("outside_radius");
-  if (input.accuracyM > 100) flags.push("poor_accuracy");
+  if (input.accuracyM > (input.accuracyToleranceM || 100)) flags.push("poor_accuracy");
   if (!input.withinTimeWindow) flags.push("outside_time_window");
   if (!input.hasSelfie) flags.push("missing_selfie");
   if (input.hasExistingToday) flags.push("duplicate_submission");

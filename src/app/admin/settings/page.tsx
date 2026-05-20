@@ -17,6 +17,7 @@ interface SchoolConfig {
   latitude: number;
   longitude: number;
   radius_m: number;
+  accuracy_tolerance_m?: number;
   economy_config?: any;
 }
 
@@ -72,7 +73,8 @@ export default function AdminSettingsPage() {
         name: school.name, 
         latitude: school.latitude, 
         longitude: school.longitude, 
-        radius_m: school.radius_m
+        radius_m: school.radius_m,
+        accuracy_tolerance_m: school.accuracy_tolerance_m || 100
       })
       .eq("id", school.id);
       
@@ -281,7 +283,10 @@ export default function AdminSettingsPage() {
                   {field(t.adminSettings.latitude, school.latitude, (v) => setSchool({ ...school, latitude: parseFloat(v) || 0 }), "number", "any")}
                   {field(t.adminSettings.longitude, school.longitude, (v) => setSchool({ ...school, longitude: parseFloat(v) || 0 }), "number", "any")}
                 </div>
-                {field(t.adminSettings.allowedRadius, school.radius_m, (v) => setSchool({ ...school, radius_m: parseInt(v) || 0 }), "number")}
+                <div className="grid grid-cols-2 gap-4">
+                  {field(t.adminSettings.allowedRadius, school.radius_m, (v) => setSchool({ ...school, radius_m: parseInt(v) || 0 }), "number")}
+                  {field("GPS Accuracy Tolerance (m)", school.accuracy_tolerance_m || 100, (v) => setSchool({ ...school, accuracy_tolerance_m: parseInt(v) || 0 }), "number")}
+                </div>
               </div>
               
               <div className="bg-muted p-4 rounded-xl border border-border flex items-start gap-3">
