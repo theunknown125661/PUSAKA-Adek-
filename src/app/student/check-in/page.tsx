@@ -17,6 +17,9 @@ import { RequirementItem, type RequirementStatus } from "@/components/ui/require
 import { ValidationSummary, type ValidationError } from "@/components/ui/validation-summary";
 import { AlertBanner } from "@/components/ui/alert-banner";
 import { toast } from "sonner";
+import dynamic from "next/dynamic";
+
+const CheckInMap = dynamic(() => import("@/components/student/check-in-map"), { ssr: false });
 
 export default function CheckInPage() {
   const { profile } = useUserRole();
@@ -263,6 +266,18 @@ export default function CheckInPage() {
             </div>
           ) : (
             <>
+              {school && (
+                <CheckInMap
+                  studentLat={position.latitude}
+                  studentLng={position.longitude}
+                  accuracy={position.accuracy}
+                  schoolLat={school.latitude}
+                  schoolLng={school.longitude}
+                  schoolRadius={school.radius_m}
+                  withinRadius={withinRadius}
+                />
+              )}
+
               <div className={`rounded-xl p-5 text-center transition-colors border ${withinRadius ? "bg-success/5 border-success/20 text-success" : "bg-destructive/5 border-destructive/20 text-destructive"}`}>
                 <p className="text-3xl font-bold tracking-tight">{formatDistance(distance || 0)}</p>
                 <p className="text-sm opacity-80 mt-1">{t.checkin.location.fromSchool}</p>
