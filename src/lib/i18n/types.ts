@@ -692,6 +692,38 @@ export interface Messages {
     successSavingPassword: string;
     errorSavingPassword: string;
   };
+  notifications: {
+    title: string;
+    markAllRead: string;
+    noNotifications: string;
+    noNotificationsDesc: string;
+    filterAll: string;
+    filterRewards: string;
+    filterAttendance: string;
+    filterWallet: string;
+    filterAlerts: string;
+    filterSystem: string;
+    justNow: string;
+    minutesAgo: string;
+    hoursAgo: string;
+    yesterday: string;
+    daysAgo: string;
+    viewAll: string;
+    attendanceApproved: string;
+    attendanceRejected: string;
+    streakMilestone: string;
+    streakProtected: string;
+    badgeUnlocked: string;
+    questCompleted: string;
+    coinsEarned: string;
+    levelUp: string;
+    withdrawalApproved: string;
+    withdrawalRejected: string;
+    pendingReviews: string;
+    flaggedSubmission: string;
+    pendingWithdrawals: string;
+    unreadCount: string;
+  };
   fraud: {
     outside_radius: string;
     poor_accuracy: string;

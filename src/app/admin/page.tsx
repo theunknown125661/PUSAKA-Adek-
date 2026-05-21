@@ -90,90 +90,95 @@ export default function AdminDashboard() {
 
   return (
     <div className="space-y-6 animate-fade-in pb-12">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold">{t.admin.dashboardTitle}</h1>
-        <p className="text-muted-foreground text-sm mt-1">{t.admin.dashboardDesc}</p>
+      {/* Premium Admin Header */}
+      <div className="flex items-center justify-between">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">
+            <ClipboardCheck className="h-7 w-7 text-primary" />
+            {t.admin.dashboardTitle}
+          </h1>
+          <p className="text-muted-foreground text-xs font-semibold">{t.admin.dashboardDesc}</p>
+        </div>
       </div>
 
       {/* Grid stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {cards.map((c) => (
           <Link 
             key={c.label} 
             href={c.href} 
-            className="card rounded-2xl p-5 hover:border-primary/40 active:scale-[0.99] transition-all flex flex-col justify-between group"
+            className="card rounded-[24px] p-5 hover:border-primary/40 active:scale-[0.99] transition-all flex flex-col justify-between group shadow-sm bg-card border border-border/50"
           >
-            <div className={`h-10 w-10 rounded-xl ${c.bg} flex items-center justify-center mb-4 shrink-0 transition-transform group-hover:scale-105`}>
+            <div className={`h-11 w-11 rounded-xl ${c.bg} flex items-center justify-center mb-4 shrink-0 transition-transform group-hover:scale-105`}>
               <c.icon className={`h-5 w-5 ${c.color}`} />
             </div>
             <div>
-              <p className="text-xl font-extrabold truncate">{c.value}</p>
-              <p className="text-xs text-muted-foreground font-semibold mt-1 truncate">{c.label}</p>
+              <p className="text-2xl font-black truncate">{c.value}</p>
+              <p className="text-[10px] text-muted-foreground font-black uppercase tracking-wider mt-1.5 truncate">{c.label}</p>
             </div>
           </Link>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Quick Actions */}
-        <div className="card rounded-2xl p-5 lg:col-span-1 space-y-4 shadow-sm">
-          <h2 className="font-semibold text-lg flex items-center gap-2 px-1">
-            <Activity className="h-5 w-5 text-primary" /> {t.admin.quickActions}
+        <div className="card rounded-[32px] p-6 lg:col-span-1 space-y-5 border border-border/30 bg-card shadow-sm">
+          <h2 className="font-black text-sm uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+            <Activity className="h-4.5 w-4.5 text-primary" /> {t.admin.quickActions}
           </h2>
-          <div className="space-y-2">
-            <Link href="/admin/attendance" className="flex items-center justify-between p-3.5 rounded-xl bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all font-semibold text-sm active:scale-[0.98]">
+          <div className="space-y-3">
+            <Link href="/admin/attendance" className="flex items-center justify-between p-4 rounded-2xl bg-muted/40 hover:bg-primary/10 hover:text-primary border border-border/40 hover:border-primary/20 transition-all font-bold text-sm active:scale-[0.98]">
               <span>{t.admin.verifyAttendance}</span>
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-4.5 w-4.5" />
             </Link>
-            <Link href="/admin/withdrawals" className="flex items-center justify-between p-3.5 rounded-xl bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all font-semibold text-sm active:scale-[0.98]">
+            <Link href="/admin/withdrawals" className="flex items-center justify-between p-4 rounded-2xl bg-muted/40 hover:bg-primary/10 hover:text-primary border border-border/40 hover:border-primary/20 transition-all font-bold text-sm active:scale-[0.98]">
               <span>{t.admin.processWithdrawals}</span>
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-4.5 w-4.5" />
             </Link>
-            <Link href="/admin/users" className="flex items-center justify-between p-3.5 rounded-xl bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all font-semibold text-sm active:scale-[0.98]">
+            <Link href="/admin/users" className="flex items-center justify-between p-4 rounded-2xl bg-muted/40 hover:bg-primary/10 hover:text-primary border border-border/40 hover:border-primary/20 transition-all font-bold text-sm active:scale-[0.98]">
               <span>{t.admin.addNewUser}</span>
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-4.5 w-4.5" />
             </Link>
-            <Link href="/admin/reports" className="flex items-center justify-between p-3.5 rounded-xl bg-muted/50 hover:bg-primary/10 hover:text-primary transition-all font-semibold text-sm active:scale-[0.98]">
+            <Link href="/admin/reports" className="flex items-center justify-between p-4 rounded-2xl bg-muted/40 hover:bg-primary/10 hover:text-primary border border-border/40 hover:border-primary/20 transition-all font-bold text-sm active:scale-[0.98]">
               <span>{t.admin.viewReports}</span>
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-4.5 w-4.5" />
             </Link>
           </div>
         </div>
 
         {/* Recent Activity Feed */}
-        <div className="card rounded-2xl p-5 lg:col-span-2 flex flex-col shadow-sm">
-          <div className="flex items-center justify-between mb-5 px-1">
-            <h2 className="font-semibold text-lg flex items-center gap-2">
-              <Clock className="h-5 w-5 text-primary" /> {t.admin.recentVerification}
+        <div className="card rounded-[32px] p-6 lg:col-span-2 flex flex-col border border-border/30 bg-card shadow-sm">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="font-black text-sm uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+              <Clock className="h-4.5 w-4.5 text-primary" /> {t.admin.recentVerification}
             </h2>
-            <Link href="/admin/audit" className="text-xs font-bold text-primary hover:underline">{t.admin.viewAuditLog}</Link>
+            <Link href="/admin/audit" className="text-xs font-black text-primary hover:text-primary/80 transition-colors uppercase tracking-wider">{t.admin.viewAuditLog}</Link>
           </div>
           
-          <div className="flex-1 space-y-4 overflow-y-auto max-h-[320px] hide-scrollbar">
+          <div className="flex-1 space-y-3 overflow-y-auto max-h-[360px] pr-1 scrollbar-thin">
             {recentActivity.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center text-muted-foreground py-10">
-                <ClipboardCheck className="h-10 w-10 mb-2 opacity-40 text-muted-foreground" />
-                <p className="text-sm font-semibold">{t.admin.noRecentActivity}</p>
+                <ClipboardCheck className="h-10 w-10 mb-3 opacity-40 text-muted-foreground" />
+                <p className="text-xs font-black uppercase tracking-wider">{t.admin.noRecentActivity}</p>
               </div>
             ) : (
               recentActivity.map((activity) => (
-                <div key={activity.id} className="flex items-start gap-3 bg-muted/20 p-3 rounded-xl hover:bg-muted/40 transition-colors">
-                  <div className={`mt-1.5 h-2.5 w-2.5 rounded-full shrink-0 ${activity.action === 'approved' ? 'bg-success' : 'bg-destructive'}`} />
+                <div key={activity.id} className="flex items-start gap-4 bg-muted/30 border border-border/30 p-4 rounded-2xl hover:bg-muted/50 transition-colors">
+                  <div className={`mt-1 h-3 w-3 rounded-full shrink-0 ${activity.action === 'approved' ? 'bg-emerald-500' : 'bg-rose-500'} shadow-sm`} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium leading-relaxed">
-                      <span className="font-bold">{activity.reviewer?.full_name}</span>{" "}
-                      <span className={activity.action === 'approved' ? 'text-success font-bold' : 'text-destructive font-bold'}>
+                    <p className="text-sm font-semibold leading-relaxed text-foreground">
+                      <span className="font-black">{activity.reviewer?.full_name}</span>{" "}
+                      <span className={activity.action === 'approved' ? 'text-emerald-600 dark:text-emerald-500 font-black' : 'text-rose-600 dark:text-rose-500 font-black'}>
                         {activity.action === 'approved' ? t.admin.approvedAction : t.admin.rejectedAction}
                       </span>{" "}
-                      {t.admin.attendanceFor} <span className="font-bold">{(activity.attendance_logs?.profiles as unknown as { full_name: string })?.full_name}</span>
+                      <span className="text-muted-foreground">{t.admin.attendanceFor}</span> <span className="font-black">{(activity.attendance_logs?.profiles as unknown as { full_name: string })?.full_name}</span>
                     </p>
-                    <div className="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-muted-foreground font-semibold">
+                    <div className="flex flex-wrap items-center gap-3 mt-2 text-[10px] text-muted-foreground font-black uppercase tracking-wider">
                       <span>
                         {new Date(activity.created_at).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' })}
                       </span>
                       {activity.note && (
-                        <span className="text-xs font-semibold text-muted-foreground bg-muted px-2.5 py-0.5 rounded-full max-w-[280px] truncate">
+                        <span className="text-[10px] font-bold text-muted-foreground bg-muted/60 px-3 py-1 rounded-full max-w-[280px] truncate normal-case tracking-normal">
                           {t.admin.noteLabel} {activity.note}
                         </span>
                       )}

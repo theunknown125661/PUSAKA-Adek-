@@ -40,3 +40,12 @@ export function formatDateTime(date: Date | string): string {
 export function formatAccuracy(meters: number): string {
   return `±${Math.round(meters)}m`;
 }
+
+/** Formats a Date object to YYYY-MM-DD in the local timezone. */
+export function toLocalYYYYMMDD(date: Date = new Date()): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+

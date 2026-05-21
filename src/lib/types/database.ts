@@ -43,6 +43,7 @@ export interface Profile {
   level: number;
   coins: number;
   streak_current?: number;
+  rupiah?: number;
 }
 
 export interface Cosmetic {
@@ -345,4 +346,51 @@ export interface UserQuest {
   progress: number;
   completed_at?: string | null;
   created_at: string;
+}
+
+// ── Notification System ──────────────────────────────────────────────
+
+export type NotificationType =
+  | 'attendance_approved'
+  | 'attendance_rejected'
+  | 'streak_milestone'
+  | 'streak_protected'
+  | 'badge_unlocked'
+  | 'quest_completed'
+  | 'coins_earned'
+  | 'level_up'
+  | 'withdrawal_approved'
+  | 'withdrawal_rejected'
+  | 'shop_purchase'
+  | 'pending_reviews'
+  | 'flagged_submission'
+  | 'pending_withdrawals'
+  | 'attendance_anomaly';
+
+export type NotificationCategory =
+  | 'transactional'
+  | 'reminder'
+  | 'reward'
+  | 'alert'
+  | 'digest';
+
+export type NotificationPriority = 'low' | 'medium' | 'high';
+
+export interface AppNotification {
+  id: string;
+  user_id: string;
+  actor_id: string | null;
+  type: NotificationType;
+  category: NotificationCategory;
+  priority: NotificationPriority;
+  title: string;
+  message: string;
+  action_url: string | null;
+  related_type: string | null;
+  related_id: string | null;
+  is_read: boolean;
+  read_at: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  expires_at: string | null;
 }

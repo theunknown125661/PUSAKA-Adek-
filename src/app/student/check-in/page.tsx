@@ -8,7 +8,7 @@ import { useGeolocation } from "@/lib/hooks/use-geolocation";
 import { useCamera } from "@/lib/hooks/use-camera";
 import { useTranslation } from "@/lib/i18n/use-translation";
 import { haversineDistance } from "@/lib/utils/haversine";
-import { formatDistance, formatAccuracy, formatCurrency } from "@/lib/utils/format";
+import { formatDistance, formatAccuracy, formatCurrency, toLocalYYYYMMDD } from "@/lib/utils/format";
 import { detectFraudFlags } from "@/lib/utils/fraud-flags";
 
 import { MapPin, Camera, Clock, Gift, RefreshCw, Send, CheckCircle2, GraduationCap, ChevronRight, ChevronLeft, ShieldAlert, Sparkles, Award } from "lucide-react";
@@ -58,7 +58,7 @@ export default function CheckInPage() {
       const [schoolRes, rulesRes, todayRes] = await Promise.all([
         supabase.from("schools").select("latitude, longitude, radius_m, accuracy_tolerance_m").eq("id", schoolId).single(),
         supabase.from("reward_rules").select("*").eq("school_id", schoolId).single(),
-        supabase.from("attendance_logs").select("id").eq("student_id", profile!.id).eq("attendance_date", new Date().toISOString().split("T")[0]).limit(1),
+        supabase.from("attendance_logs").select("id").eq("student_id", profile!.id).eq("attendance_date", toLocalYYYYMMDD()).limit(1),
       ]);
       if (schoolRes.data) setSchool(schoolRes.data);
       if (rulesRes.data) setRewardRules(rulesRes.data as any);
@@ -184,7 +184,7 @@ export default function CheckInPage() {
         student_id: profile.id,
         class_id: enrollment.class_id,
         school_id: enrollment.school_id,
-        attendance_date: new Date().toISOString().split("T")[0],
+        attendance_date: toLocalYYYYMMDD(),
         submitted_at: new Date().toISOString(),
         latitude: position.latitude,
         longitude: position.longitude,

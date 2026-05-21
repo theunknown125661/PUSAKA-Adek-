@@ -8,23 +8,27 @@ import { useUserRole } from "@/lib/hooks/use-user-role";
 import { useTranslation } from "@/lib/i18n/use-translation";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { EmptyState } from "@/components/shared/empty-state";
-import { formatDate, formatTime, formatDistance, formatAccuracy } from "@/lib/utils/format";
-import { Users, Clock, Send, AlertTriangle, ChevronLeft, MapPin, Sparkles, CheckCircle2, X } from "lucide-react";
-import { StatefulButton, type ButtonState } from "@/components/ui/stateful-button";
+import { formatTime, formatDistance } from "@/lib/utils/format";
+import { Users, Clock, AlertTriangle, ChevronLeft, MapPin, X, Check, Flag } from "lucide-react";
+import { type ButtonState } from "@/components/ui/stateful-button";
 import { toast } from "sonner";
 import type { AttendanceLog } from "@/lib/types/database";
 
 export default function ClassDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { profile } = useUserRole();
-  const { t, interpolate, isClient } = useTranslation();
+  const { t, isClient } = useTranslation();
   const [className, setClassName] = useState("");
   const [logs, setLogs] = useState<AttendanceLog[]>([]);
   const [loading, setLoading] = useState(true);
-  const [noteMap, setNoteMap] = useState<Record<string, string>>({});
   
   const [actionStates, setActionStates] = useState<Record<string, ButtonState>>({});
   const [flagStates, setFlagStates] = useState<Record<string, ButtonState>>({});
+
+  // Flag reason & quick choice states
+  const [activeFlaggingLog, setActiveFlaggingLog] = useState<string | null>(null);
+  const [selectedReason, setSelectedReason] = useState<string>("");
+  const [customReason, setCustomReason] = useState<string>("");
 
   // Lightbox overlay state for zooming student selfies
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
@@ -46,64 +50,86 @@ export default function ClassDetailPage() {
     load();
   }, [profile, id]);
 
-  const handleAddNote = async (logId: string) => {
+  const handleApprove = async (logId: string) => {
     if (!profile) return;
-    const note = noteMap[logId];
-    if (!note?.trim()) {
-      toast.error("Please enter a note.");
-      return;
-    }
-    
     setActionStates(prev => ({ ...prev, [logId]: "loading" }));
     
     try {
       const supabase = createClient();
       
-      const { error: noteError } = await supabase.from("teacher_notes").insert({
-        attendance_id: logId,
-        teacher_id: profile.id,
-        note: note.trim(),
-      });
-      
-      if (noteError) throw new Error(noteError.message);
-
-      // Update attendance status to pending_admin_review
       const { error: updateError } = await supabase.from("attendance_logs").update({
-        status: "pending_admin_review",
-        teacher_note_summary: note.trim(),
+        status: "approved",
+        teacher_note_summary: "Verified by teacher",
       }).eq("id", logId);
       
       if (updateError) throw new Error(updateError.message);
 
-      setLogs((prev) => prev.map((l) => l.id === logId ? { ...l, status: "pending_admin_review" as const, teacher_note_summary: note.trim() } : l));
-      setNoteMap((prev) => ({ ...prev, [logId]: "" }));
+      // Create review record
+      await supabase.from("attendance_reviews").insert({
+        attendance_id: logId,
+        reviewer_id: profile.id,
+        reviewer_role: "teacher",
+        action: "approved",
+        note: "Verified by teacher",
+      });
+
+      setLogs((prev) => prev.map((l) => l.id === logId ? { ...l, status: "approved" as const, teacher_note_summary: "Verified by teacher" } : l));
       setActionStates(prev => ({ ...prev, [logId]: "success" }));
-      toast.success(t.teacher.noteSuccess);
+      toast.success("Attendance verified successfully!");
       setTimeout(() => setActionStates(prev => ({ ...prev, [logId]: "idle" })), 2000);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setActionStates(prev => ({ ...prev, [logId]: "error" }));
-      toast.error(`Failed: ${err.message}`);
+      toast.error(`Failed to verify: ${err instanceof Error ? err.message : String(err)}`);
       setTimeout(() => setActionStates(prev => ({ ...prev, [logId]: "idle" })), 3000);
     }
   };
 
-  const handleFlag = async (logId: string) => {
+  const handleFlagWithReason = async (logId: string) => {
     if (!profile) return;
+    const finalReason = selectedReason === "custom" ? customReason : selectedReason;
+    if (!finalReason) {
+      toast.error("Please select a reason or write a custom description.");
+      return;
+    }
+
     setFlagStates(prev => ({ ...prev, [logId]: "loading" }));
     
     try {
       const supabase = createClient();
-      const { error } = await supabase.from("attendance_logs").update({ teacher_flag_status: "flagged" }).eq("id", logId);
       
-      if (error) throw new Error(error.message);
+      const { error: updateError } = await supabase.from("attendance_logs").update({
+        status: "pending_admin_review",
+        teacher_flag_status: "flagged",
+        teacher_note_summary: finalReason,
+      }).eq("id", logId);
       
-      setLogs((prev) => prev.map((l) => l.id === logId ? { ...l, teacher_flag_status: "flagged" } : l));
+      if (updateError) throw new Error(updateError.message);
+
+      // Create review record
+      await supabase.from("attendance_reviews").insert({
+        attendance_id: logId,
+        reviewer_id: profile.id,
+        reviewer_role: "teacher",
+        action: "rejected", // Teachers mark it as rejected/flagged for admin
+        note: finalReason,
+      });
+
+      setLogs((prev) => prev.map((l) => l.id === logId ? { 
+        ...l, 
+        status: "pending_admin_review" as const, 
+        teacher_flag_status: "flagged",
+        teacher_note_summary: finalReason 
+      } : l));
+      
       setFlagStates(prev => ({ ...prev, [logId]: "success" }));
-      toast.success(t.teacher.flagSuccess);
+      setActiveFlaggingLog(null);
+      setSelectedReason("");
+      setCustomReason("");
+      toast.success("Submission flagged for review.");
       setTimeout(() => setFlagStates(prev => ({ ...prev, [logId]: "idle" })), 2000);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setFlagStates(prev => ({ ...prev, [logId]: "error" }));
-      toast.error(`Failed to flag: ${err.message}`);
+      toast.error(`Failed to flag: ${err instanceof Error ? err.message : String(err)}`);
       setTimeout(() => setFlagStates(prev => ({ ...prev, [logId]: "idle" })), 3000);
     }
   };
@@ -149,7 +175,7 @@ export default function ClassDetailPage() {
                 {/* Header row details */}
                 <div className="flex justify-between items-start gap-4">
                   <div>
-                    <h3 className="font-extrabold text-sm leading-snug">{(log.profiles as any)?.full_name || "Student"}</h3>
+                    <h3 className="font-extrabold text-sm leading-snug">{(log.profiles as unknown as { full_name: string })?.full_name || "Student"}</h3>
                     <p className="text-[10px] text-muted-foreground font-semibold mt-0.5">
                       Submitted at {formatTime(log.submitted_at)} • {formatDistance(log.distance_m)}
                     </p>
@@ -215,32 +241,94 @@ export default function ClassDetailPage() {
 
                 {/* Interactive feedback inputs */}
                 {log.status === "pending_teacher_view" && (
-                  <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-border/40">
-                    <input 
-                      value={noteMap[log.id] || ""} 
-                      onChange={(e) => setNoteMap((prev) => ({ ...prev, [log.id]: e.target.value }))} 
-                      placeholder="Add an approval note or query..." 
-                      className="flex-1 px-4 py-3 rounded-xl bg-muted/60 border-none text-xs font-bold focus:ring-2 focus:ring-primary focus:bg-background transition-all" 
-                    />
-                    <div className="flex gap-2 shrink-0">
-                      <StatefulButton
-                        onClick={() => handleAddNote(log.id)}
-                        state={actionStates[log.id] || "idle"}
-                        label="Submit Note"
-                        loadingLabel="Submitting"
-                        icon={Send}
-                        className="px-4 py-3 text-xs font-black rounded-xl border-0 shrink-0 shadow-sm"
-                      />
-                      <StatefulButton
-                        onClick={() => handleFlag(log.id)}
-                        state={flagStates[log.id] || "idle"}
-                        label="Flag Submission"
-                        loadingLabel="Flagging"
-                        icon={AlertTriangle}
-                        variant="destructive"
-                        className="px-4 py-3 text-xs font-black rounded-xl border-0 text-rose-600 bg-rose-500/10 hover:bg-rose-500/15 shrink-0"
-                      />
-                    </div>
+                  <div className="pt-3 border-t border-border/20 space-y-4">
+                    {activeFlaggingLog !== log.id ? (
+                      <div className="flex gap-2">
+                        {/* Quick Verify button */}
+                        <button
+                          onClick={() => handleApprove(log.id)}
+                          disabled={actionStates[log.id] === "loading" || flagStates[log.id] === "loading"}
+                          className="flex-1 h-11 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-xs flex items-center justify-center gap-2 border-0 active:scale-[0.98] transition-all shadow-sm shadow-emerald-500/10"
+                        >
+                          {actionStates[log.id] === "loading" ? (
+                            <div className="h-4.5 w-4.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <>
+                              <Check className="h-4.5 w-4.5" />
+                              Verify Attendance
+                            </>
+                          )}
+                        </button>
+
+                        {/* Flag button */}
+                        <button
+                          onClick={() => {
+                            setActiveFlaggingLog(log.id);
+                            setSelectedReason("");
+                          }}
+                          disabled={actionStates[log.id] === "loading" || flagStates[log.id] === "loading"}
+                          className="px-4 h-11 rounded-2xl bg-rose-500/10 hover:bg-rose-500/15 text-rose-600 font-extrabold text-xs flex items-center justify-center gap-2 border-0 active:scale-[0.98] transition-all"
+                        >
+                          <Flag className="h-4 w-4" />
+                          Flag
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="bg-muted/30 p-4 rounded-2xl border border-border/20 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">Select Flag Reason</span>
+                          <button 
+                            onClick={() => setActiveFlaggingLog(null)}
+                            className="text-muted-foreground hover:text-foreground text-[10px] font-bold"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1.5">
+                          {[
+                            { id: "wrong_loc", label: "Wrong Location" },
+                            { id: "bad_photo", label: "Invalid Photo / Blurry" },
+                            { id: "late", label: "Outside Window / Late" },
+                            { id: "custom", label: "Other..." }
+                          ].map((reason) => (
+                            <button
+                              key={reason.id}
+                              onClick={() => setSelectedReason(reason.id)}
+                              className={`px-3 py-1.5 rounded-xl text-[10px] font-extrabold transition-all border ${
+                                selectedReason === reason.id 
+                                  ? "bg-rose-500/10 border-rose-500/30 text-rose-600" 
+                                  : "bg-muted border-transparent text-muted-foreground hover:bg-muted/80"
+                              }`}
+                            >
+                              {reason.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {selectedReason === "custom" && (
+                          <input
+                            type="text"
+                            placeholder="Type a custom reason..."
+                            value={customReason}
+                            onChange={(e) => setCustomReason(e.target.value)}
+                            className="input w-full px-3 py-2 rounded-xl text-xs font-semibold focus:ring-1 focus:ring-rose-500 bg-background"
+                          />
+                        )}
+
+                        <button
+                          onClick={() => handleFlagWithReason(log.id)}
+                          disabled={flagStates[log.id] === "loading" || !selectedReason || (selectedReason === "custom" && !customReason)}
+                          className="w-full h-9 rounded-xl bg-rose-500 text-white font-extrabold text-[10px] uppercase tracking-wider flex items-center justify-center gap-1.5 border-0 shadow-sm"
+                        >
+                          {flagStates[log.id] === "loading" ? (
+                            <div className="h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            "Confirm & Flag"
+                          )}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useUserRole } from "@/lib/hooks/use-user-role";
 import { useTranslation } from "@/lib/i18n/use-translation";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
-import { Wallet as WalletIcon, ArrowUpRight, ArrowDownLeft, Lock, Clock, Plus, Coins, Banknote, Loader2, Award, ArrowRight, CheckCircle2, AlertCircle } from "lucide-react";
+import { Wallet as WalletIcon, Lock, Clock, Coins, Loader2, Award, ArrowRight, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
+import AvatarDisplay from "@/components/profile/avatar-display";
+import { NotificationBell } from "@/components/shared/notification-bell";
 
 type Wallet = {
   id: string;
@@ -42,32 +44,38 @@ export default function WalletPage() {
   const [payoutRequests, setPayoutRequests] = useState<PayoutRequest[]>([]);
   const [loading, setLoading] = useState(true);
   
-  const [activeTab, setActiveTab] = useState<"transactions" | "payouts">("transactions");
   const [txCurrencyFilter, setTxCurrencyFilter] = useState<"ALL" | "COIN" | "RUPIAH">("ALL");
   const [withdrawAmount, setWithdrawAmount] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
+  const [showWithdrawSheet, setShowWithdrawSheet] = useState(false);
 
-  useEffect(() => {
+  const fetchWalletData = useCallback(async () => {
     if (!profile) return;
-    fetchWalletData();
-  }, [profile]);
-
-  async function fetchWalletData() {
-    setLoading(true);
     const supabase = createClient();
     
-    const [walletsRes, txRes, requestsRes] = await Promise.all([
-      supabase.from("wallets").select("*").eq("user_id", profile!.id),
-      supabase.from("wallet_transactions").select("*").eq("user_id", profile!.id).order("created_at", { ascending: false }).limit(30),
-      supabase.from("payout_requests").select("*").eq("user_id", profile!.id).order("created_at", { ascending: false }).limit(15)
-    ]);
-    
-    if (walletsRes.data) setWallets(walletsRes.data);
-    if (txRes.data) setTransactions(txRes.data);
-    if (requestsRes.data) setPayoutRequests(requestsRes.data);
-    
-    setLoading(false);
-  }
+    try {
+      const [walletsRes, txRes, requestsRes] = await Promise.all([
+        supabase.from("wallets").select("*").eq("user_id", profile.id),
+        supabase.from("wallet_transactions").select("*").eq("user_id", profile.id).order("created_at", { ascending: false }).limit(30),
+        supabase.from("payout_requests").select("*").eq("user_id", profile.id).order("created_at", { ascending: false }).limit(15)
+      ]);
+      
+      if (walletsRes.data) setWallets(walletsRes.data);
+      if (txRes.data) setTransactions(txRes.data);
+      if (requestsRes.data) setPayoutRequests(requestsRes.data);
+    } catch (error) {
+      console.error("Error fetching wallet data:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [profile]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchWalletData();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchWalletData]);
 
   async function handleRequestPayout() {
     const amount = parseInt(withdrawAmount);
@@ -116,7 +124,6 @@ export default function WalletPage() {
     return <div className="flex items-center justify-center min-h-[60vh]"><div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
   }
 
-  const coinWallet = wallets.find(w => w.currency_type === 'COIN');
   const rupiahWallet = wallets.find(w => w.currency_type === 'RUPIAH');
 
   // Filtered transactions
@@ -126,275 +133,258 @@ export default function WalletPage() {
   });
 
   return (
-    <div className="space-y-6 animate-fade-in pb-16">
-      {/* Page Header */}
-      <div>
-        <h1 className="text-2xl font-black flex items-center gap-2">
-          <WalletIcon className="h-6 w-6 text-primary" />
-          {t.wallet.title}
-        </h1>
-        <p className="text-muted-foreground text-xs mt-1">{t.wallet.subtitle}</p>
-      </div>
-
-      {/* 3 Gamified Header Pills (XP, Coins, Rupiah) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* XP Card */}
-        <div className="card rounded-[28px] p-5 flex flex-col justify-between border border-border/50 bg-gradient-to-br from-indigo-500/5 to-purple-500/5">
-          <div className="flex justify-between items-start">
-            <div className="h-10 w-10 rounded-2xl bg-indigo-500/10 flex items-center justify-center">
-              <Award className="h-5 w-5 text-indigo-500" />
-            </div>
-            <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-500/10 text-indigo-600 px-2 py-0.5 rounded-full">
-              Level {profile?.level || 1}
-            </span>
-          </div>
-          <div className="mt-4">
-            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-none">Experience Points</p>
-            <p className="text-2xl font-black mt-1 leading-none">{profile?.xp || 0} XP</p>
-          </div>
-        </div>
-
-        {/* Coins Card */}
-        <div className="card rounded-[28px] p-5 flex flex-col justify-between border border-border/50 bg-gradient-to-br from-amber-500/5 to-orange-500/5">
-          <div className="flex justify-between items-start">
-            <div className="h-10 w-10 rounded-2xl bg-amber-500/10 flex items-center justify-center">
-              <Coins className="h-5 w-5 text-amber-500 animate-pulse" />
-            </div>
-            <span className="text-[10px] font-black uppercase tracking-wider bg-amber-500/10 text-amber-600 px-2 py-0.5 rounded-full">
-              Shop Coins
-            </span>
-          </div>
-          <div className="mt-4">
-            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-none">Coins Balance</p>
-            <p className="text-2xl font-black mt-1 leading-none">{profile?.coins || 0} C</p>
-          </div>
-        </div>
-
-        {/* Rupiah Card */}
-        <div className="card rounded-[28px] p-5 flex flex-col justify-between border border-border/50 bg-gradient-to-br from-emerald-500/5 to-teal-500/5">
-          <div className="flex justify-between items-start">
-            <div className="h-10 w-10 rounded-2xl bg-emerald-500/10 flex items-center justify-center">
-              <Banknote className="h-5 w-5 text-emerald-500" />
-            </div>
-            <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-600 px-2 py-0.5 rounded-full">
-              Cash Payouts
-            </span>
-          </div>
-          <div className="mt-4">
-            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-none">Available Balance</p>
-            <p className="text-2xl font-black mt-1 leading-none text-emerald-600 dark:text-emerald-500">
-              {formatCurrency(rupiahWallet?.balance_available || 0)}
-            </p>
-          </div>
+    <div className="space-y-6 animate-fade-in pb-24 lg:pb-8 max-w-md lg:max-w-4xl mx-auto px-1">
+      {/* Top Header */}
+      <div className="flex justify-between items-center py-1 lg:hidden">
+        <div>
+          <span className="text-xs font-extrabold text-muted-foreground">My Finance</span>
+          <h2 className="font-black text-lg text-foreground leading-none mt-1">My Wallet</h2>
         </div>
       </div>
 
-      {/* Detailed Rupiah Ledger Breakdowns (Pending/Locked) */}
+      <div className="lg:grid lg:grid-cols-5 lg:gap-6 space-y-6 lg:space-y-0">
+      <div className="space-y-6 lg:col-span-2">
+      {/* Cash Balance Hero Card (Mockup 3 styling) */}
+      <div className="card rounded-[32px] p-6 border border-border/30 bg-card space-y-5 shadow-sm relative overflow-hidden">
+        <div className="absolute right-4 top-4 h-16 w-16 rounded-full bg-amber-500/5 flex items-center justify-center">
+          <WalletIcon className="h-7 w-7 text-amber-600/70" />
+        </div>
+        
+        <div>
+          <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest leading-none">Cash Balance</p>
+          <h2 className="text-3.5xl font-black text-[#8B5E00] dark:text-amber-500 mt-2.5 leading-none">
+            {formatCurrency(rupiahWallet?.balance_available || 0)}
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 pt-1">
+          <button 
+            disabled 
+            className="py-3 rounded-2xl bg-muted/60 text-muted-foreground font-extrabold text-xs text-center cursor-not-allowed opacity-50"
+          >
+            Top Up
+          </button>
+          <button 
+            onClick={() => setShowWithdrawSheet(true)}
+            className="py-3 rounded-2xl bg-teal-500 hover:bg-teal-600 active:scale-[0.98] transition-all text-white font-extrabold text-xs text-center shadow-md shadow-teal-500/10 border-0"
+          >
+            Withdraw
+          </button>
+        </div>
+      </div>
+
+      {/* Two circular/grid cards below (Coins and XP) */}
       <div className="grid grid-cols-2 gap-4">
-        <div className="bg-card border border-border/40 p-4.5 rounded-2xl flex items-center gap-3">
-          <div className="h-9 w-9 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
-            <Clock className="h-4.5 w-4.5 text-amber-500" />
+        {/* Virtual Coins Card */}
+        <div className="card rounded-[28px] p-5 border border-border/30 bg-card text-center flex flex-col items-center justify-between shadow-sm min-h-[135px]">
+          <div className="h-10 w-10 rounded-full bg-amber-500/10 flex items-center justify-center">
+            <Coins className="h-5 w-5 text-amber-500 fill-amber-500/20" />
+          </div>
+          <div className="mt-3">
+            <p className="text-[9px] font-black text-muted-foreground uppercase tracking-widest leading-none">Virtual Coins</p>
+            <p className="text-xl font-black text-foreground mt-1.5 leading-none">{profile?.coins?.toLocaleString("id-ID") || 0}</p>
+          </div>
+        </div>
+
+        {/* XP Points Card */}
+        <div className="card rounded-[28px] p-5 border border-border/30 bg-card text-center flex flex-col items-center justify-between shadow-sm min-h-[135px]">
+          <div className="h-10 w-10 rounded-full bg-indigo-500/10 flex items-center justify-center">
+            <Award className="h-5 w-5 text-indigo-500" />
+          </div>
+          <div className="mt-3">
+            <p className="text-[9px] font-black text-muted-foreground uppercase tracking-widest leading-none">XP Points</p>
+            <p className="text-xl font-black text-foreground mt-1.5 leading-none">{profile?.xp?.toLocaleString("id-ID") || 0}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Detail Breakdown of balances */}
+      <div className="grid grid-cols-2 gap-3.5">
+        <div className="bg-muted/30 border border-border/20 p-4 rounded-2xl flex items-center gap-3">
+          <div className="h-8.5 w-8.5 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
+            <Clock className="h-4 w-4 text-amber-600" />
           </div>
           <div>
-            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider leading-none mb-1">Pending approval</p>
-            <p className="text-sm font-extrabold text-amber-600 leading-none">
+            <p className="text-[9px] font-black text-muted-foreground uppercase tracking-wider leading-none mb-1">Pending Approval</p>
+            <p className="text-xs font-black text-amber-600 leading-none">
               {formatCurrency(rupiahWallet?.balance_pending || 0)}
             </p>
           </div>
         </div>
-        <div className="bg-card border border-border/40 p-4.5 rounded-2xl flex items-center gap-3">
-          <div className="h-9 w-9 rounded-xl bg-blue-500/10 flex items-center justify-center shrink-0">
-            <Lock className="h-4.5 w-4.5 text-blue-500" />
+        <div className="bg-muted/30 border border-border/20 p-4 rounded-2xl flex items-center gap-3">
+          <div className="h-8.5 w-8.5 rounded-xl bg-blue-500/10 flex items-center justify-center shrink-0">
+            <Lock className="h-4 w-4 text-blue-600" />
           </div>
           <div>
-            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider leading-none mb-1">Locked (End of Month)</p>
-            <p className="text-sm font-extrabold text-blue-600 leading-none">
+            <p className="text-[9px] font-black text-muted-foreground uppercase tracking-wider leading-none mb-1">Locked (End Month)</p>
+            <p className="text-xs font-black text-blue-600 leading-none">
               {formatCurrency(rupiahWallet?.balance_locked || 0)}
             </p>
           </div>
         </div>
       </div>
+      </div>
+      <div className="space-y-6 lg:col-span-3">
 
-      {/* Pill Tabs Selector */}
-      <div className="bg-muted/60 p-1 rounded-2xl flex gap-1 max-w-md">
-        <button 
-          onClick={() => setActiveTab("transactions")}
-          className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all ${
-            activeTab === 'transactions' 
-              ? 'bg-card text-foreground shadow-sm' 
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          Transactions Ledger
-        </button>
-        <button 
-          onClick={() => setActiveTab("payouts")}
-          className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all ${
-            activeTab === 'payouts' 
-              ? 'bg-card text-foreground shadow-sm' 
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          Withdraw Rewards
-        </button>
+      {/* Recent Activity Ledger List */}
+      <div className="card rounded-[32px] p-6 border border-border/30 bg-card space-y-5 shadow-sm">
+        <div className="flex justify-between items-center pb-2 border-b border-border/20">
+          <h3 className="font-black text-sm text-foreground">Recent Activity</h3>
+          <button 
+            onClick={() => {
+              setTxCurrencyFilter("ALL");
+              // Fallback view trigger or just show all
+            }}
+            className="text-[10px] font-black uppercase text-primary hover:underline"
+          >
+            See All
+          </button>
+        </div>
+
+        <div className="space-y-0 divide-y divide-border/20">
+          {filteredTxs.slice(0, 10).map(tx => {
+            const isGain = tx.amount > 0;
+            const isCoin = tx.currency_type === 'COIN';
+            return (
+              <div key={tx.id} className="flex justify-between items-center py-3.5 text-xs font-semibold first:pt-0 last:pb-0">
+                <div className="flex items-center gap-3">
+                  <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${
+                    isCoin 
+                      ? "bg-amber-500/10 text-amber-600" 
+                      : isGain 
+                        ? "bg-emerald-500/10 text-emerald-600" 
+                        : "bg-rose-500/10 text-rose-600"
+                  }`}>
+                    {isCoin ? (
+                      <Coins className="h-4 w-4" />
+                    ) : (
+                      <WalletIcon className="h-4 w-4" />
+                    )}
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-xs text-foreground leading-snug">{tx.note || tx.event_type}</h4>
+                    <p className="text-[9px] text-muted-foreground mt-0.5">{formatDate(tx.created_at)}</p>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className={`font-black text-xs block ${isGain ? 'text-emerald-500' : 'text-rose-500'}`}>
+                    {isGain ? '+' : ''}{tx.amount.toLocaleString("id-ID")}
+                  </span>
+                  <span className={`text-[8px] font-black uppercase tracking-wider block ${isCoin ? 'text-amber-600' : 'text-emerald-600'}`}>
+                    {tx.currency_type}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+          {filteredTxs.length === 0 && (
+            <div className="text-center text-muted-foreground py-8 font-semibold text-xs">
+              No recent wallet transactions.
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Main tab panel cards */}
-      <div className="card rounded-[32px] p-6 border border-border/50 bg-card">
-        {activeTab === 'transactions' && (
-          <div className="space-y-6">
-            {/* Filter chips */}
-            <div className="flex flex-wrap gap-1.5 border-b border-border/40 pb-4">
-              <button 
-                onClick={() => setTxCurrencyFilter("ALL")}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold border transition-all ${
-                  txCurrencyFilter === "ALL" 
-                    ? "bg-primary/10 border-primary/20 text-primary" 
-                    : "bg-muted/40 border-transparent text-muted-foreground hover:bg-muted"
-                }`}
-              >
-                All Transactions
-              </button>
-              <button 
-                onClick={() => setTxCurrencyFilter("COIN")}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold border transition-all ${
-                  txCurrencyFilter === "COIN" 
-                    ? "bg-amber-500/10 border-amber-500/20 text-amber-600" 
-                    : "bg-muted/40 border-transparent text-muted-foreground hover:bg-muted"
-                }`}
-              >
-                Coins Ledger
-              </button>
-              <button 
-                onClick={() => setTxCurrencyFilter("RUPIAH")}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold border transition-all ${
-                  txCurrencyFilter === "RUPIAH" 
-                    ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" 
-                    : "bg-muted/40 border-transparent text-muted-foreground hover:bg-muted"
-                }`}
-              >
-                Rupiah Ledger
-              </button>
-            </div>
-
-            <div className="space-y-0 divide-y divide-border/40">
-              {filteredTxs.map(tx => (
-                <div key={tx.id} className="flex justify-between items-center py-4 text-xs font-semibold first:pt-0 last:pb-0">
-                  <div className="space-y-1">
-                    <p className="font-extrabold text-sm leading-snug">{tx.note || tx.event_type}</p>
-                    <p className="text-[10px] text-muted-foreground">{formatDate(tx.created_at)}</p>
-                  </div>
-                  <div className="flex items-center gap-2.5 shrink-0">
-                    <div className="text-right">
-                      <span className={`font-black text-sm block ${tx.amount > 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                        {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString("id-ID")}
-                      </span>
-                      <span className={`text-[9px] font-bold uppercase tracking-wider block ${tx.currency_type === 'COIN' ? 'text-amber-600' : 'text-emerald-600'}`}>
-                        {tx.currency_type}
-                      </span>
-                    </div>
-
-                    <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${
-                      tx.state === 'RELEASED' || tx.state === 'APPROVED' 
-                        ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600' 
-                        : tx.state === 'PENDING' 
-                        ? 'bg-amber-500/10 border-amber-500/20 text-amber-600' 
-                        : 'bg-muted border-transparent text-muted-foreground'
-                    }`}>
-                      {tx.state}
-                    </span>
-                  </div>
+      {/* Payout History Section */}
+      {payoutRequests.length > 0 && (
+        <div className="card rounded-[32px] p-6 border border-border/30 bg-card space-y-4 shadow-sm">
+          <h3 className="font-black text-sm text-foreground">Withdrawal History</h3>
+          <div className="space-y-0 divide-y divide-border/20">
+            {payoutRequests.slice(0, 5).map(req => (
+              <div key={req.id} className="flex justify-between items-center py-3 text-xs font-semibold first:pt-0 last:pb-0">
+                <div>
+                  <p className="font-black text-foreground">{formatCurrency(req.amount)}</p>
+                  <p className="text-[9px] text-muted-foreground mt-0.5">{formatDate(req.created_at)}</p>
                 </div>
-              ))}
-              {filteredTxs.length === 0 && (
-                <div className="text-center text-muted-foreground py-10 font-semibold text-xs">
-                  {t.wallet.noTransactions}
-                </div>
-              )}
-            </div>
+                <span className={`text-[8px] font-black uppercase px-2.5 py-1 rounded-full border ${
+                  req.state === 'PAID' 
+                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600' 
+                    : req.state === 'APPROVED' 
+                    ? 'bg-blue-500/10 border-blue-500/20 text-blue-600' 
+                    : req.state === 'REQUESTED' 
+                    ? 'bg-amber-500/10 border-amber-500/20 text-amber-600' 
+                    : 'bg-rose-500/10 border-rose-500/20 text-rose-600'
+                }`}>
+                  {req.state}
+                </span>
+              </div>
+            ))}
           </div>
-        )}
+        </div>
+      )}
+      </div>
+      </div>
 
-        {activeTab === 'payouts' && (
-          <div className="space-y-6">
-            {/* Request Form with presets */}
-            <div className="bg-muted/30 border border-border/40 p-5 rounded-[24px] space-y-4">
-              <div>
-                <h3 className="font-extrabold text-sm">{t.wallet.requestPayoutHeader}</h3>
-                <p className="text-[10px] text-muted-foreground mt-0.5">Submit a payout request to transfer school streak earnings to cash.</p>
-              </div>
+      {/* Slide-Up Bottom Sheet for Payout/Withdrawal */}
+      {showWithdrawSheet && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center animate-fade-in">
+          {/* Backdrop */}
+          <div 
+            onClick={() => setShowWithdrawSheet(false)}
+            className="absolute inset-0 bg-black/40 backdrop-blur-xs transition-opacity" 
+          />
+          {/* Content Sheet */}
+          <div className="relative w-full max-w-md bg-background border-t border-border/40 rounded-t-[32px] p-6 shadow-2xl animate-in slide-in-from-bottom duration-300 z-10 space-y-5 max-h-[85vh] overflow-y-auto">
+            <div className="w-12 h-1.5 bg-muted rounded-full mx-auto" />
+            
+            <div>
+              <h3 className="font-black text-base text-foreground">Withdraw Earnings</h3>
+              <p className="text-[10px] text-muted-foreground mt-1">Convert your available Rupiah balance into cash. Minimum transfer is Rp 25.000.</p>
+            </div>
 
-              {/* Presets Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {[25000, 50000, 100000, 250000].map(val => (
-                  <button
-                    key={val}
-                    type="button"
-                    onClick={() => selectPresetAmount(val)}
-                    className="py-2 px-3 rounded-xl border border-border/60 bg-card hover:bg-muted text-xs font-bold text-center transition-all"
-                  >
-                    Rp {val.toLocaleString("id-ID")}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex gap-3">
-                <div className="relative flex-1">
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground font-black text-xs">Rp</span>
-                  <input 
-                    type="number" 
-                    className="input w-full pl-9 py-3 rounded-xl font-bold text-xs" 
-                    placeholder="Enter Custom Amount (Min 25,000)" 
-                    value={withdrawAmount}
-                    onChange={e => setWithdrawAmount(e.target.value)}
-                  />
-                </div>
-                <button 
-                  onClick={handleRequestPayout}
-                  disabled={submitting}
-                  className="btn btn-primary px-5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md shrink-0 border-0"
+            {/* Presets Grid */}
+            <div className="grid grid-cols-2 gap-2">
+              {[25000, 50000, 100000, 250000].map(val => (
+                <button
+                  key={val}
+                  type="button"
+                  onClick={() => selectPresetAmount(val)}
+                  className="py-2.5 px-3 rounded-xl border border-border/40 bg-card hover:bg-muted text-xs font-black text-center transition-all"
                 >
-                  {submitting ? <Loader2 className="h-4.5 w-4.5 animate-spin" /> : <ArrowRight className="h-4.5 w-4.5" />}
-                  Withdraw
+                  Rp {val.toLocaleString("id-ID")}
                 </button>
-              </div>
-              <div className="flex items-start gap-1.5 text-[9px] text-muted-foreground leading-snug px-1">
-                <AlertCircle className="h-3 w-3 shrink-0 text-muted-foreground/60 mt-0.5" />
-                <p>{t.wallet.payoutInfo}</p>
-              </div>
+              ))}
             </div>
 
-            {/* Request History */}
-            <div className="space-y-4 pt-2">
-              <h3 className="font-extrabold text-sm">{t.wallet.payoutHistoryHeader}</h3>
-              <div className="space-y-0 divide-y divide-border/40">
-                {payoutRequests.map(req => (
-                  <div key={req.id} className="flex justify-between items-center py-3.5 text-xs font-semibold first:pt-0 last:pb-0">
-                    <div className="space-y-0.5">
-                      <p className="font-extrabold text-sm">{formatCurrency(req.amount)}</p>
-                      <p className="text-[10px] text-muted-foreground">{formatDate(req.created_at)}</p>
-                    </div>
-                    <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${
-                      req.state === 'PAID' 
-                        ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600' 
-                        : req.state === 'APPROVED' 
-                        ? 'bg-blue-500/10 border-blue-500/20 text-blue-600' 
-                        : req.state === 'REQUESTED' 
-                        ? 'bg-amber-500/10 border-amber-500/20 text-amber-600' 
-                        : 'bg-rose-500/10 border-rose-500/20 text-rose-600'
-                    }`}>
-                      {req.state}
-                    </span>
-                  </div>
-                ))}
-                {payoutRequests.length === 0 && (
-                  <div className="text-center text-muted-foreground py-6 font-semibold text-xs">{t.wallet.noPayouts}</div>
-                )}
+            <div className="space-y-3">
+              <div className="relative">
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground font-black text-xs">Rp</span>
+                <input 
+                  type="number" 
+                  className="input w-full pl-9 py-3 rounded-xl font-bold text-xs" 
+                  placeholder="Enter custom amount" 
+                  value={withdrawAmount}
+                  onChange={e => setWithdrawAmount(e.target.value)}
+                />
               </div>
+              
+              <button 
+                onClick={async () => {
+                  await handleRequestPayout();
+                  setShowWithdrawSheet(false);
+                }}
+                disabled={submitting}
+                className="w-full bg-teal-500 hover:bg-teal-600 active:scale-[0.98] text-white font-extrabold text-sm py-3 rounded-xl flex items-center justify-center gap-2 border-0 shadow-md shadow-teal-500/10 transition-all"
+              >
+                {submitting ? <Loader2 className="h-4.5 w-4.5 animate-spin" /> : <ArrowRight className="h-4.5 w-4.5" />}
+                Confirm Withdrawal
+              </button>
             </div>
+
+            <div className="flex items-start gap-2 text-[9px] text-muted-foreground/80 leading-normal bg-muted/40 p-3 rounded-xl border border-border/20">
+              <AlertCircle className="h-3.5 w-3.5 text-muted-foreground/60 shrink-0 mt-0.5" />
+              <p>Payout transfers are processed by the school administration within 1-2 business days. Available Rupiah balance will be locked upon submitting.</p>
+            </div>
+
+            <button 
+              onClick={() => setShowWithdrawSheet(false)}
+              className="w-full py-2.5 rounded-xl border border-border/40 text-xs font-bold hover:bg-muted/50"
+            >
+              Cancel
+            </button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

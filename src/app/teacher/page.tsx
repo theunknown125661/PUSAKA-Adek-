@@ -84,7 +84,7 @@ export default function TeacherDashboard() {
       </div>
 
       {/* Metric Summaries Grid */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {/* Total Students */}
         <div className="card rounded-[24px] p-4 flex flex-col items-center justify-center text-center border border-border/50 bg-gradient-to-br from-indigo-500/5 to-transparent">
           <div className="h-9 w-9 rounded-xl bg-indigo-500/10 flex items-center justify-center mb-2 shrink-0">
@@ -123,7 +123,7 @@ export default function TeacherDashboard() {
             description={t.teacher.noClassesDesc} 
           />
         ) : (
-          <div className="grid grid-cols-1 gap-3">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {classes.map((cls) => (
               <Link 
                 key={cls.id} 

@@ -29,22 +29,40 @@ export function useUserRole() {
         setProfile(data as Profile);
         setRole(data.role as UserRole);
 
-        // Fetch school and class if student
+        // Fetch school, class, streak, and wallets if student
         if (data.role === "student") {
-          const { data: enr } = await supabase
-            .from("enrollments")
-            .select("classes(name, schools(name))")
-            .eq("student_id", user.id)
-            .maybeSingle();
-          
-          if (enr) {
-            setProfile({
-              ...data,
-              class_name: (enr.classes as any)?.name,
-              school_name: ((enr.classes as any)?.schools as any)?.name
-            } as any);
-          }
+          const [enrRes, streakRes, walletsRes] = await Promise.all([
+            supabase
+              .from("enrollments")
+              .select("classes(name, schools(name))")
+              .eq("student_id", user.id)
+              .maybeSingle(),
+            supabase
+              .from("streaks")
+              .select("current_streak")
+              .eq("student_id", user.id)
+              .maybeSingle(),
+            supabase
+              .from("wallets")
+              .select("currency_type, balance_available")
+              .eq("user_id", user.id)
+          ]);
+
+          const coinWallet = walletsRes.data?.find(w => w.currency_type === "COIN");
+          const rupiahWallet = walletsRes.data?.find(w => w.currency_type === "RUPIAH");
+
+          setProfile({
+            ...data,
+            class_name: (enrRes.data?.classes as any)?.name || null,
+            school_name: ((enrRes.data?.classes as any)?.schools as any)?.name || null,
+            streak_current: streakRes.data?.current_streak ?? 0,
+            coins: coinWallet?.balance_available ?? data.coins ?? 0,
+            rupiah: rupiahWallet?.balance_available ?? 0
+          } as any);
+        } else {
+          setProfile(data as Profile);
         }
+
       }
       setLoading(false);
     }

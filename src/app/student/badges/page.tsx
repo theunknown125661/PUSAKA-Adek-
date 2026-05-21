@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useTranslation } from "@/lib/i18n/use-translation";
 import { useUserRole } from "@/lib/hooks/use-user-role";
-import { Medal, Flame, Star, Trophy, Shield, CheckCircle2, Lock, Sparkles, AlertCircle } from "lucide-react";
+import { Medal, Flame, Star, Trophy, Shield, CheckCircle2, Lock, Sparkles } from "lucide-react";
 import type { Badge, StudentBadge } from "@/lib/types/database";
+import AvatarDisplay from "@/components/profile/avatar-display";
+import { NotificationBell } from "@/components/shared/notification-bell";
 
 const IconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   Flame,
@@ -20,33 +22,42 @@ export default function StudentBadgesPage() {
   const { profile } = useUserRole();
   const { t, isClient } = useTranslation();
   const [allBadges, setAllBadges] = useState<Badge[]>([]);
-  const [unlockedBadges, setUnlockedBadges] = useState<Record<string, any>>({});
+  const [unlockedBadges, setUnlockedBadges] = useState<Record<string, StudentBadge & { badges: Badge | null }>>({});
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"ALL" | "UNLOCKED" | "LOCKED">("ALL");
 
-  useEffect(() => {
-    if (profile) fetchBadges();
-  }, [profile]);
-
-  async function fetchBadges() {
+  const fetchBadges = useCallback(async () => {
+    if (!profile) return;
     const supabase = createClient();
     
-    const [badgesRes, userBadgesRes] = await Promise.all([
-      supabase.from("badges").select("*").eq("active", true).order("family").order("created_at"),
-      supabase.from("student_badges").select("*, badges(*)").eq("student_id", profile!.id)
-    ]);
-    
-    if (badgesRes.data) setAllBadges(badgesRes.data as Badge[]);
-    if (userBadgesRes.data) {
-      const unlockedMap: Record<string, any> = {};
-      userBadgesRes.data.forEach((ub: any) => {
-        unlockedMap[ub.badge_id] = ub;
-      });
-      setUnlockedBadges(unlockedMap);
+    try {
+      const [badgesRes, userBadgesRes] = await Promise.all([
+        supabase.from("badges").select("*").eq("active", true).order("family").order("created_at"),
+        supabase.from("student_badges").select("*, badges(*)").eq("student_id", profile.id)
+      ]);
+      
+      if (badgesRes.data) setAllBadges(badgesRes.data as Badge[]);
+      if (userBadgesRes.data) {
+        const unlockedMap: Record<string, StudentBadge & { badges: Badge | null }> = {};
+        const typedUserBadges = userBadgesRes.data as unknown as (StudentBadge & { badges: Badge | null })[];
+        typedUserBadges.forEach((ub) => {
+          unlockedMap[ub.badge_id] = ub;
+        });
+        setUnlockedBadges(unlockedMap);
+      }
+    } catch (error) {
+      console.error("Error fetching badges:", error);
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
-  }
+  }, [profile]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchBadges();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchBadges]);
 
   if (!isClient || loading) {
     return <div className="flex items-center justify-center min-h-[60vh]"><div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
@@ -70,23 +81,25 @@ export default function StudentBadgesPage() {
   const unlockedCount = Object.keys(unlockedBadges).length;
 
   return (
-    <div className="space-y-6 animate-fade-in pb-16">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div className="space-y-6 animate-fade-in pb-24 lg:pb-8 max-w-md lg:max-w-5xl mx-auto px-1">
+      {/* Top Header */}
+      <div className="flex justify-between items-center py-1 lg:hidden">
         <div>
-          <h1 className="text-2xl font-black flex items-center gap-2">
-            <Medal className="h-6 w-6 text-primary" />
-            {t.badges.title}
-          </h1>
-          <p className="text-muted-foreground text-xs mt-1">{t.badges.subtitle}</p>
+          <span className="text-xs font-extrabold text-muted-foreground">My Profile</span>
+          <h2 className="font-black text-lg text-foreground leading-none mt-1">My Badges</h2>
         </div>
+      </div>
 
-        <div className="flex items-center gap-2.5 bg-amber-500/10 px-4 py-2 rounded-2xl border border-amber-500/20 shadow-sm shrink-0">
-          <Trophy className="h-5 w-5 text-amber-500 animate-bounce" />
-          <div className="flex flex-col text-left">
-            <span className="text-[9px] uppercase tracking-wider font-bold text-amber-600 dark:text-amber-500 leading-none mb-0.5">{t.badges.earned}</span>
-            <span className="text-sm font-extrabold text-amber-600 dark:text-amber-500 leading-none">{unlockedCount} / {allBadges.length} Earned</span>
-          </div>
+      {/* Tracker Card */}
+      <div className="card rounded-[32px] p-6 border border-border/30 bg-card space-y-4 shadow-sm relative overflow-hidden">
+        <div className="absolute right-4 top-4 h-16 w-16 rounded-full bg-amber-500/5 flex items-center justify-center">
+          <Trophy className="h-7 w-7 text-amber-500/70" />
+        </div>
+        <div>
+          <p className="text-[9px] font-black text-muted-foreground uppercase tracking-widest leading-none">Unlocked Achievements</p>
+          <h2 className="text-3xl font-black text-amber-600 dark:text-amber-500 mt-2.5 leading-none">
+            {unlockedCount} / {allBadges.length} <span className="text-sm font-extrabold text-muted-foreground">Earned</span>
+          </h2>
         </div>
       </div>
 
