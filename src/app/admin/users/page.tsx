@@ -6,7 +6,8 @@ import { useTranslation } from "@/lib/i18n/use-translation";
 import { EmptyState } from "@/components/shared/empty-state";
 import { 
   Users, GraduationCap, BookOpen, Shield, Plus, Loader2, Mail, Lock, 
-  User as UserIcon, Calendar, Wallet, Award, School, X, ChevronRight, Save 
+  User as UserIcon, Calendar, Wallet, Award, School, X, ChevronRight, Save,
+  Flame, Star, Trophy
 } from "lucide-react";
 import type { Profile } from "@/lib/types/database";
 import { toast } from "sonner";
@@ -27,6 +28,8 @@ export default function UserManagementPage() {
   const [editUsername, setEditUsername] = useState("");
   const [editBio, setEditBio] = useState("");
   const [editRole, setEditRole] = useState("student");
+  const [editXP, setEditXP] = useState(0);
+  const [editLevel, setEditLevel] = useState(1);
   const [updatingProfile, setUpdatingProfile] = useState(false);
 
   // New admin management states
@@ -56,14 +59,20 @@ export default function UserManagementPage() {
     password: "",
     full_name: "",
     role: "student",
+    school_id: ""
   });
+  const [allSchools, setAllSchools] = useState<{ id: string; name: string }[]>([]);
 
   const loadUsers = async () => {
     const supabase = createClient();
-    let query = supabase.from("profiles").select("*").order("created_at", { ascending: false });
+    let query = supabase.from("profiles").select(`
+      *,
+      schools ( name ),
+      enrollments ( classes ( name ) )
+    `).order("created_at", { ascending: false });
     if (filterRole !== "all") query = query.eq("role", filterRole);
     const { data } = await query;
-    setUsers((data || []) as Profile[]);
+    setUsers((data || []) as any[]);
     setLoading(false);
   };
 
@@ -73,12 +82,16 @@ export default function UserManagementPage() {
   }, [filterRole]);
 
   useEffect(() => {
-    async function loadAllClasses() {
+    async function loadGlobals() {
       const supabase = createClient();
-      const { data } = await supabase.from("classes").select("id, name").order("name");
-      if (data) setAllClasses(data);
+      const [{ data: classesData }, { data: schoolsData }] = await Promise.all([
+        supabase.from("classes").select("id, name").order("name"),
+        supabase.from("schools").select("id, name").order("name")
+      ]);
+      if (classesData) setAllClasses(classesData);
+      if (schoolsData) setAllSchools(schoolsData);
     }
-    loadAllClasses();
+    loadGlobals();
   }, []);
 
   // Load detailed profile parameters when clicked
@@ -89,6 +102,11 @@ export default function UserManagementPage() {
     setEditUsername((user as any).username || "");
     setEditBio((user as any).bio || "");
     setEditRole(user.role || "student");
+    setEditXP(user.xp || 0);
+    setEditLevel(user.level || 1);
+    
+    // Also init a state for editSchool
+    setFormData(prev => ({ ...prev, school_id: user.school_id || "" }));
     
     if (user.role !== "student") return; // Details like wallets/badges are only for students
 
@@ -107,6 +125,7 @@ export default function UserManagementPage() {
         .from("enrollments")
         .select(`
           id,
+          class_id,
           classes (
             name,
             grade_level
@@ -166,6 +185,7 @@ export default function UserManagementPage() {
         } else {
           toast.success("Student successfully unassigned from class");
           setSelectedClassId("");
+          loadUsers();
           if (userDetails) {
             setUserDetails({
               ...userDetails,
@@ -194,6 +214,7 @@ export default function UserManagementPage() {
           } else {
             toast.success("Class enrollment updated successfully!");
             setSelectedClassId(newClassId);
+            loadUsers();
             const { data: cls } = await supabase.from("classes").select("name, grade_level").eq("id", newClassId).single();
             if (userDetails) {
               setUserDetails({
@@ -218,6 +239,7 @@ export default function UserManagementPage() {
           } else {
             toast.success("Student enrolled in class successfully!");
             setSelectedClassId(newClassId);
+            loadUsers();
             const { data: cls } = await supabase.from("classes").select("name, grade_level").eq("id", newClassId).single();
             if (userDetails) {
               setUserDetails({
@@ -246,10 +268,13 @@ export default function UserManagementPage() {
     const { error } = await supabase
       .from("profiles")
       .update({ 
-        full_name: editFullName, 
-        username: editUsername, 
-        bio: editBio,
-        role: editRole
+        full_name: editFullName.trim(), 
+        username: editUsername.trim() || null, 
+        bio: editBio.trim() || null,
+        role: editRole,
+        school_id: formData.school_id || null,
+        xp: editRole === "student" ? editXP : undefined,
+        level: editRole === "student" ? editLevel : undefined
       })
       .eq("id", selectedUser.id);
       
@@ -257,9 +282,9 @@ export default function UserManagementPage() {
       toast.error(interpolate(t.adminUsers.errorUpdating, { message: error.message }));
     } else {
       toast.success(t.adminUsers.successUpdating);
-      // Update local state in list
-      setUsers(users.map(u => u.id === selectedUser.id ? { ...u, full_name: editFullName, username: editUsername, bio: editBio, role: editRole as any } : u));
-      setSelectedUser({ ...selectedUser, full_name: editFullName, username: editUsername, bio: editBio, role: editRole as any } as Profile);
+      // We must reload users so the school relation query updates, ensuring it jumps to the right group
+      loadUsers();
+      setSelectedUser({ ...selectedUser, full_name: editFullName, username: editUsername, bio: editBio, role: editRole as any, school_id: formData.school_id || null, xp: editRole === "student" ? editXP : selectedUser.xp, level: editRole === "student" ? editLevel : selectedUser.level } as Profile);
     }
     setUpdatingProfile(false);
   };
@@ -283,7 +308,7 @@ export default function UserManagementPage() {
         setErrorMsg(interpolate(t.adminUsers.errorCreating, { message: data.error || "" }));
       } else {
         setSuccessMsg(t.adminUsers.successCreating);
-        setFormData({ email: "", password: "", full_name: "", role: "student" });
+        setFormData({ email: "", password: "", full_name: "", role: "student", school_id: "" });
         loadUsers(); // Refresh the list
         setTimeout(() => {
           setShowAddModal(false);
@@ -355,35 +380,102 @@ export default function UserManagementPage() {
       {users.length === 0 ? (
         <EmptyState icon={Users} title={t.adminUsers.noUsers} />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {users.map((u) => (
-            <div 
-              key={u.id} 
-              onClick={() => handleViewDetails(u)}
-              className="glass rounded-xl p-4 flex items-center justify-between hover:border-primary/45 transition-colors cursor-pointer group"
-            >
-              <div className="flex items-center gap-3 overflow-hidden">
-                <div className="h-10 w-10 shrink-0 rounded-full bg-muted flex items-center justify-center group-hover:bg-primary/10 transition-colors">
-                  {roleIcon(u.role)}
+        <div className="space-y-12">
+          {["admin", "teacher", "student"].map(roleFilter => {
+            // Check if there are users for this role
+            const roleUsers = users.filter(u => u.role === roleFilter);
+            if (roleUsers.length === 0) return null;
+
+            // Group by School
+            const schoolGroups = roleUsers.reduce((acc, u: any) => {
+              const schoolName = u.schools?.name || "Unassigned School";
+              if (!acc[schoolName]) acc[schoolName] = [];
+              acc[schoolName].push(u);
+              return acc;
+            }, {} as Record<string, any[]>);
+
+            return (
+              <div key={roleFilter} className="space-y-6">
+                <div className="flex items-center gap-3 border-b border-border/50 pb-2">
+                  <div className={`p-2 rounded-lg ${
+                    roleFilter === "admin" ? "bg-amber-500/10 text-amber-500" :
+                    roleFilter === "teacher" ? "bg-blue-500/10 text-blue-500" :
+                    "bg-primary/10 text-primary"
+                  }`}>
+                    {roleIcon(roleFilter)}
+                  </div>
+                  <h2 className="text-xl font-bold capitalize tracking-tight">{roleFilter}s</h2>
                 </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium truncate group-hover:text-primary transition-colors">{u.full_name}</p>
-                  <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+
+                <div className="space-y-8 pl-4 border-l-2 border-muted">
+                  {Object.entries(schoolGroups).map(([schoolName, schoolUsers]) => {
+                    
+                    // Group by Class for students, otherwise just list
+                    const classGroups = schoolUsers.reduce((acc, u: any) => {
+                      let className = "Staff / No Class";
+                      if (roleFilter === "student") {
+                        const enr = Array.isArray(u.enrollments) ? u.enrollments[0] : u.enrollments;
+                        className = enr?.classes?.name || "Unassigned Class";
+                      }
+                      
+                      if (!acc[className]) acc[className] = [];
+                      acc[className].push(u);
+                      return acc;
+                    }, {} as Record<string, any[]>);
+
+                    return (
+                      <div key={schoolName} className="space-y-4">
+                        <h3 className="text-sm font-semibold flex items-center gap-2 text-foreground/80">
+                          <School className="h-4 w-4 text-muted-foreground" /> {schoolName}
+                          <span className="text-xs bg-muted px-2 py-0.5 rounded-full text-muted-foreground font-medium">{schoolUsers.length}</span>
+                        </h3>
+                        
+                        <div className="space-y-6 pl-4 border-l-2 border-muted/50">
+                          {Object.entries(classGroups).map(([className, _classUsers]) => {
+                            const classUsers = _classUsers as any[];
+                            return (
+                            <div key={className} className="space-y-3">
+                              {roleFilter === "student" && (
+                                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                                  {className}
+                                  <span className="bg-muted px-1.5 py-0.5 rounded text-[10px]">{classUsers.length}</span>
+                                </h4>
+                              )}
+                              
+                              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                                {classUsers.map((u) => (
+                                  <div 
+                                    key={u.id} 
+                                    onClick={() => handleViewDetails(u)}
+                                    className="glass rounded-xl p-4 flex items-center justify-between hover:border-primary/45 transition-colors cursor-pointer group shadow-sm"
+                                  >
+                                    <div className="flex items-center gap-3 overflow-hidden">
+                                      <div className="h-10 w-10 shrink-0 rounded-full bg-muted flex items-center justify-center group-hover:bg-primary/10 transition-colors">
+                                        {roleIcon(u.role)}
+                                      </div>
+                                      <div className="min-w-0">
+                                        <p className="text-sm font-medium truncate group-hover:text-primary transition-colors">{u.full_name}</p>
+                                        <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                                      </div>
+                                    </div>
+                                    
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <ChevronRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-primary/70 transition-colors" />
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-              
-              <div className="flex items-center gap-2 shrink-0">
-                <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                  u.role === "admin" ? "bg-amber-500/10 text-amber-500" : 
-                  u.role === "teacher" ? "bg-blue-500/10 text-blue-500" : 
-                  "bg-primary/10 text-primary"
-                }`}>
-                  {u.role}
-                </span>
-                <ChevronRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-primary/70 transition-colors" />
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -468,6 +560,23 @@ export default function UserManagementPage() {
                 </div>
               </div>
 
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Assign to School (Optional)</label>
+                <div className="relative">
+                  <School className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <select
+                    value={formData.school_id}
+                    onChange={(e) => setFormData({...formData, school_id: e.target.value})}
+                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 appearance-none"
+                  >
+                    <option value="">-- Unassigned --</option>
+                    {allSchools.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               {errorMsg && <p className="text-xs font-medium text-destructive bg-destructive/10 p-3 rounded-lg">{errorMsg}</p>}
               {successMsg && <p className="text-xs font-medium text-emerald-500 bg-emerald-500/10 p-3 rounded-lg">{successMsg}</p>}
 
@@ -518,6 +627,51 @@ export default function UserManagementPage() {
             {/* Content Body */}
             <div className="p-6 space-y-6 flex-1">
               
+              {/* Visual Profile Header */}
+              <div className="flex flex-col items-center justify-center p-6 bg-gradient-to-br from-primary/10 to-primary/5 rounded-3xl border border-primary/10 relative overflow-hidden">
+                {/* Decorative background elements */}
+                <div className="absolute top-0 right-0 w-32 h-32 bg-primary/10 rounded-full blur-3xl transform translate-x-1/2 -translate-y-1/2"></div>
+                <div className="absolute bottom-0 left-0 w-24 h-24 bg-primary/10 rounded-full blur-2xl transform -translate-x-1/2 translate-y-1/2"></div>
+
+                <div className="h-24 w-24 rounded-full bg-background/50 backdrop-blur-md border-[3px] border-background shadow-xl flex items-center justify-center mb-3 overflow-hidden relative z-10">
+                  {selectedUser.avatar_url ? (
+                    <img src={selectedUser.avatar_url} alt="Avatar" className="h-full w-full object-cover" />
+                  ) : (
+                    <UserIcon className="h-10 w-10 text-primary/40" />
+                  )}
+                </div>
+                
+                <h3 className="font-bold text-xl relative z-10">{selectedUser.full_name}</h3>
+                {selectedUser.username ? (
+                  <p className="text-sm font-semibold text-primary mb-1 relative z-10">@{selectedUser.username}</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground italic mb-1 relative z-10">No username set</p>
+                )}
+                
+                {selectedUser.bio && (
+                  <p className="text-xs text-center text-muted-foreground mt-2 max-w-[250px] relative z-10">"{selectedUser.bio}"</p>
+                )}
+
+                {selectedUser.role === "student" && (
+                  <div className="grid grid-cols-3 gap-2 w-full mt-6 relative z-10">
+                    <div className="bg-background/60 backdrop-blur-md rounded-2xl p-3 flex flex-col items-center justify-center shadow-sm border border-white/10 dark:border-white/5 transition-transform hover:scale-105">
+                      <Trophy className="h-4 w-4 text-yellow-500 mb-1.5" />
+                      <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider">Level</span>
+                      <span className="font-black text-sm">{selectedUser.level || 1}</span>
+                    </div>
+                    <div className="bg-background/60 backdrop-blur-md rounded-2xl p-3 flex flex-col items-center justify-center shadow-sm border border-white/10 dark:border-white/5 transition-transform hover:scale-105">
+                      <Star className="h-4 w-4 text-purple-500 mb-1.5" />
+                      <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider">XP</span>
+                      <span className="font-black text-sm">{selectedUser.xp || 0}</span>
+                    </div>
+                    <div className="bg-background/60 backdrop-blur-md rounded-2xl p-3 flex flex-col items-center justify-center shadow-sm border border-white/10 dark:border-white/5 transition-transform hover:scale-105">
+                      <Flame className="h-4 w-4 text-orange-500 mb-1.5" />
+                      <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider">Streak</span>
+                      <span className="font-black text-sm">{selectedUser.streak_current || 0}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
               {/* Account General Information Card */}
               <div className="glass rounded-2xl p-4 space-y-3.5">
                 <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{t.adminUsers.accountCredentials}</h3>
@@ -534,62 +688,6 @@ export default function UserManagementPage() {
                 </div>
               </div>
 
-              {/* Profile Customization Card */}
-              <div className="glass rounded-2xl p-4 space-y-3">
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                  <UserIcon className="h-3.5 w-3.5 text-primary" /> {t.adminUsers.profileCustomization}
-                </h3>
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">{t.adminUsers.fullName}</label>
-                    <input 
-                      type="text" 
-                      value={editFullName} 
-                      onChange={(e) => setEditFullName(e.target.value)} 
-                      className="w-full px-3 py-2 rounded-lg bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" 
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">{t.adminUsers.username}</label>
-                    <input 
-                      type="text" 
-                      value={editUsername} 
-                      onChange={(e) => setEditUsername(e.target.value)} 
-                      className="w-full px-3 py-2 rounded-lg bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" 
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">{t.adminUsers.bio}</label>
-                    <textarea 
-                      value={editBio} 
-                      onChange={(e) => setEditBio(e.target.value)} 
-                      className="w-full px-3 py-2 rounded-lg bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 h-20 resize-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">User Role</label>
-                    <select
-                      value={editRole}
-                      onChange={(e) => setEditRole(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
-                    >
-                      <option value="student">Student</option>
-                      <option value="teacher">Teacher</option>
-                      <option value="admin">Admin</option>
-                    </select>
-                  </div>
-                  
-                  <button 
-                    onClick={handleUpdateProfile}
-                    disabled={updatingProfile}
-                    className="w-full py-2 rounded-xl bg-primary text-primary-foreground font-semibold text-sm disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    {updatingProfile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                    {updatingProfile ? t.adminUsers.saving : t.adminUsers.saveProfile}
-                  </button>
-                </div>
-              </div>
-
               {/* Loader for Student details */}
               {loadingDetails ? (
                 <div className="flex flex-col items-center justify-center py-12 space-y-2.5">
@@ -601,41 +699,7 @@ export default function UserManagementPage() {
                   {selectedUser.role === "student" && userDetails && (
                     <div className="space-y-6">
                       
-                      {/* Academic Class Card */}
-                      <div className="glass rounded-2xl p-4 space-y-3 border border-border/40">
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                            <School className="h-3.5 w-3.5 text-primary" /> {t.adminUsers.classEnrollment}
-                          </h3>
-                          {updatingEnrollment && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />}
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <select
-                            value={selectedClassId}
-                            onChange={(e) => handleClassChange(e.target.value)}
-                            disabled={updatingEnrollment}
-                            className="w-full px-3 py-2.5 rounded-xl bg-muted border border-border text-xs font-medium focus:outline-none focus:ring-2 focus:ring-primary/20"
-                          >
-                            <option value="">-- Unassigned / No Class --</option>
-                            {allClasses.map((cls) => (
-                              <option key={cls.id} value={cls.id}>
-                                {cls.name}
-                              </option>
-                            ))}
-                          </select>
-                          
-                          {selectedClassId ? (
-                            <p className="text-[10px] text-emerald-500 font-semibold px-1">
-                              ✓ Enrolled. Student receives active attendance prompts.
-                            </p>
-                          ) : (
-                            <p className="text-[10px] text-amber-500 font-semibold px-1">
-                              ⚠ Unassigned. Student won't see active check-in prompts.
-                            </p>
-                          )}
-                        </div>
-                      </div>
+
 
                       {/* Wallet Balance Cards */}
                       <div className="glass rounded-2xl p-4 space-y-4">
@@ -735,6 +799,125 @@ export default function UserManagementPage() {
                     </div>
                   )}
 
+
+              {/* Profile Customization Card */}
+              <div className="glass rounded-2xl p-4 space-y-3">
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <UserIcon className="h-3.5 w-3.5 text-primary" /> {t.adminUsers.profileCustomization}
+                </h3>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">{t.adminUsers.fullName}</label>
+                    <input 
+                      type="text" 
+                      value={editFullName} 
+                      onChange={(e) => setEditFullName(e.target.value)} 
+                      className="w-full px-3 py-2 rounded-lg bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" 
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">{t.adminUsers.username}</label>
+                    <input 
+                      type="text" 
+                      value={editUsername} 
+                      onChange={(e) => setEditUsername(e.target.value)} 
+                      className="w-full px-3 py-2 rounded-lg bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" 
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">{t.adminUsers.bio}</label>
+                    <textarea 
+                      value={editBio} 
+                      onChange={(e) => setEditBio(e.target.value)} 
+                      className="w-full px-3 py-2 rounded-lg bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 h-20 resize-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">User Role</label>
+                    <select
+                      value={editRole}
+                      onChange={(e) => setEditRole(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+                    >
+                      <option value="student">Student</option>
+                      <option value="teacher">Teacher</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">School Affiliation</label>
+                    <select
+                      value={formData.school_id}
+                      onChange={(e) => setFormData({...formData, school_id: e.target.value})}
+                      className="w-full px-3 py-2 rounded-lg bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+                    >
+                      <option value="">-- Unassigned School --</option>
+                      {allSchools.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {editRole === "student" && (
+                    <div className="space-y-4">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs font-medium text-muted-foreground">Class Assignment (Auto-saves)</label>
+                          {updatingEnrollment && <Loader2 className="h-3 w-3 animate-spin text-primary shrink-0" />}
+                        </div>
+                        <select
+                          value={selectedClassId}
+                          onChange={(e) => handleClassChange(e.target.value)}
+                          disabled={loadingDetails || updatingEnrollment}
+                          className="w-full px-3 py-2 rounded-lg bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+                        >
+                          <option value="">-- Unassigned / No Class --</option>
+                          {allClasses.map((cls) => (
+                            <option key={cls.id} value={cls.id}>
+                              {cls.name}
+                            </option>
+                          ))}
+                        </select>
+                        {selectedClassId ? (
+                          <p className="text-[10px] text-emerald-500 font-semibold px-1 mt-1">✓ Enrolled for attendance.</p>
+                        ) : (
+                          <p className="text-[10px] text-amber-500 font-semibold px-1 mt-1">⚠ Unassigned.</p>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-muted-foreground mb-1">XP</label>
+                        <input 
+                          type="number" 
+                          value={editXP} 
+                          onChange={(e) => setEditXP(e.target.value === '' ? ('' as any) : (parseInt(e.target.value) || 0))} 
+                          className="w-full px-3 py-2 rounded-lg bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-muted-foreground mb-1">Level</label>
+                        <input 
+                          type="number" 
+                          value={editLevel} 
+                          onChange={(e) => setEditLevel(e.target.value === '' ? ('' as any) : (parseInt(e.target.value) || 0))} 
+                          className="w-full px-3 py-2 rounded-lg bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50" 
+                        />
+                      </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  <button 
+                    onClick={handleUpdateProfile}
+                    disabled={updatingProfile}
+                    className="w-full py-2 rounded-xl bg-primary text-primary-foreground font-semibold text-sm disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {updatingProfile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    {updatingProfile ? t.adminUsers.saving : t.adminUsers.saveProfile}
+                  </button>
+                </div>
+              </div>
                   {/* Danger Zone */}
                   <div className="glass rounded-2xl p-4 space-y-3 border-destructive/20 bg-destructive/5 mt-6">
                     <h3 className="text-xs font-semibold text-destructive uppercase tracking-wider">Admin Danger Zone</h3>
@@ -881,7 +1064,7 @@ export default function UserManagementPage() {
                   <input
                     type="number"
                     value={adjustAvailable}
-                    onChange={(e) => setAdjustAvailable(parseInt(e.target.value) || 0)}
+                    onChange={(e) => setAdjustAvailable(e.target.value === '' ? ('' as any) : (parseInt(e.target.value) || 0))}
                     className="w-full px-3 py-2 rounded-xl bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
                   />
                 </div>
@@ -890,7 +1073,7 @@ export default function UserManagementPage() {
                   <input
                     type="number"
                     value={adjustPending}
-                    onChange={(e) => setAdjustPending(parseInt(e.target.value) || 0)}
+                    onChange={(e) => setAdjustPending(e.target.value === '' ? ('' as any) : (parseInt(e.target.value) || 0))}
                     className="w-full px-3 py-2 rounded-xl bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
                   />
                 </div>
@@ -899,7 +1082,7 @@ export default function UserManagementPage() {
                   <input
                     type="number"
                     value={adjustHeld}
-                    onChange={(e) => setAdjustHeld(parseInt(e.target.value) || 0)}
+                    onChange={(e) => setAdjustHeld(e.target.value === '' ? ('' as any) : (parseInt(e.target.value) || 0))}
                     className="w-full px-3 py-2 rounded-xl bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
                   />
                 </div>

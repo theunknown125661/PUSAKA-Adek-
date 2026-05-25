@@ -40,16 +40,20 @@ export async function updateSession(request: NextRequest) {
   // Public routes
   if (pathname === "/login" || pathname === "/" || pathname === "/auth/callback") {
     if (user) {
-      // Fetch role and redirect
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .single();
+      // Fetch role from user_metadata, fallback to DB query
+      let role = user.user_metadata?.role;
+      if (!role) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .single();
+        role = profile?.role;
+      }
 
-      if (profile?.role) {
+      if (role) {
         const redirectUrl = request.nextUrl.clone();
-        redirectUrl.pathname = `/${profile.role}`;
+        redirectUrl.pathname = `/${role}`;
         return NextResponse.redirect(redirectUrl);
       }
     }
@@ -63,14 +67,16 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Role-based route protection
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  const role = profile?.role;
+  // Role-based route protection: fetch role from metadata, fallback to DB
+  let role = user.user_metadata?.role;
+  if (!role) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+    role = profile?.role;
+  }
 
   if (pathname.startsWith("/student") && role !== "student") {
     const url = request.nextUrl.clone();

@@ -9,6 +9,7 @@ import { Wallet as WalletIcon, Lock, Clock, Coins, Loader2, Award, ArrowRight, A
 import { toast } from "sonner";
 import AvatarDisplay from "@/components/profile/avatar-display";
 import { NotificationBell } from "@/components/shared/notification-bell";
+import Link from "next/link";
 
 type Wallet = {
   id: string;
@@ -31,8 +32,8 @@ type Transaction = {
 type PayoutRequest = {
   id: string;
   amount: number;
-  state: string;
-  created_at: string;
+  status: string;
+  requested_at: string;
 };
 
 export default function WalletPage() {
@@ -57,7 +58,7 @@ export default function WalletPage() {
       const [walletsRes, txRes, requestsRes] = await Promise.all([
         supabase.from("wallets").select("*").eq("user_id", profile.id),
         supabase.from("wallet_transactions").select("*").eq("user_id", profile.id).order("created_at", { ascending: false }).limit(30),
-        supabase.from("payout_requests").select("*").eq("user_id", profile.id).order("created_at", { ascending: false }).limit(15)
+        supabase.from("withdrawal_requests").select("*").eq("student_id", profile.id).order("requested_at", { ascending: false }).limit(15)
       ]);
       
       if (walletsRes.data) setWallets(walletsRes.data);
@@ -99,11 +100,10 @@ export default function WalletPage() {
     setSubmitting(true);
     const supabase = createClient();
     
-    const { error } = await supabase.from("payout_requests").insert({
-      user_id: profile!.id,
-      amount,
-      destination: "cash",
-      state: "REQUESTED"
+    const { error } = await supabase.from("withdrawal_requests").insert({
+      student_id: profile!.id,
+      wallet_id: rupiahWallet.id,
+      amount
     });
 
     setSubmitting(false);
@@ -111,6 +111,21 @@ export default function WalletPage() {
       toast.error(error.message);
     } else {
       toast.success(t.wallet.requestSuccess);
+
+      // Notify admins about the new withdrawal request (as backup to DB trigger)
+      fetch("/api/notify-admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "pending_withdrawals",
+          category: "transactional",
+          priority: "medium",
+          title: "New Withdrawal Request",
+          message: `${profile?.full_name || "A student"} requested a payout of Rp ${amount.toLocaleString("id-ID")}.`,
+          action_url: "/admin/withdrawals",
+        }),
+      }).catch(err => console.error("Failed to send admin notification:", err));
+
       setWithdrawAmount("");
       fetchWalletData();
     }
@@ -290,25 +305,39 @@ export default function WalletPage() {
         <div className="card rounded-[32px] p-6 border border-border/30 bg-card space-y-4 shadow-sm">
           <h3 className="font-black text-sm text-foreground">Withdrawal History</h3>
           <div className="space-y-0 divide-y divide-border/20">
-            {payoutRequests.slice(0, 5).map(req => (
-              <div key={req.id} className="flex justify-between items-center py-3 text-xs font-semibold first:pt-0 last:pb-0">
+            {payoutRequests.slice(0, 5).map(req => {
+              const requiresToken = req.status === 'approved' || req.status === 'token_issued' || req.status === 'expired';
+              const content = (
+              <div className="flex justify-between items-center py-3 text-xs font-semibold first:pt-0 last:pb-0">
                 <div>
                   <p className="font-black text-foreground">{formatCurrency(req.amount)}</p>
-                  <p className="text-[9px] text-muted-foreground mt-0.5">{formatDate(req.created_at)}</p>
+                  <p className="text-[9px] text-muted-foreground mt-0.5">{formatDate(req.requested_at)}</p>
                 </div>
-                <span className={`text-[8px] font-black uppercase px-2.5 py-1 rounded-full border ${
-                  req.state === 'PAID' 
-                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600' 
-                    : req.state === 'APPROVED' 
-                    ? 'bg-blue-500/10 border-blue-500/20 text-blue-600' 
-                    : req.state === 'REQUESTED' 
-                    ? 'bg-amber-500/10 border-amber-500/20 text-amber-600' 
-                    : 'bg-rose-500/10 border-rose-500/20 text-rose-600'
-                }`}>
-                  {req.state}
-                </span>
+                <div className="flex items-center gap-3">
+                  {requiresToken && <ArrowRight className="h-4 w-4 text-primary" />}
+                  <span className={`text-[8px] font-black uppercase px-2.5 py-1 rounded-full border ${
+                    req.status === 'redeemed' 
+                      ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600' 
+                      : req.status === 'approved' || req.status === 'token_issued' 
+                      ? 'bg-blue-500/10 border-blue-500/20 text-blue-600' 
+                      : req.status === 'pending' 
+                      ? 'bg-amber-500/10 border-amber-500/20 text-amber-600' 
+                      : 'bg-rose-500/10 border-rose-500/20 text-rose-600'
+                  }`}>
+                    {req.status}
+                  </span>
+                </div>
               </div>
-            ))}
+              );
+
+              return requiresToken ? (
+                <Link href={`/student/wallet/withdrawals/${req.id}`} key={req.id} className="block hover:bg-muted/30 transition-colors -mx-2 px-2 rounded-xl">
+                  {content}
+                </Link>
+              ) : (
+                <div key={req.id}>{content}</div>
+              );
+            })}
           </div>
         </div>
       )}

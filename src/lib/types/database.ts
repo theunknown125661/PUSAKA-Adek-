@@ -6,7 +6,9 @@ export type AttendanceStatus =
   | "approved"
   | "rejected";
 
-export type WithdrawalStatus = "pending" | "approved" | "rejected";
+export type ArrivalStatus = "early" | "normal" | "late" | "absent";
+
+export type WithdrawalStatus = "pending" | "approved" | "rejected" | "token_issued" | "redeemed" | "expired" | "cancelled";
 
 export type TransactionType =
   | "attendance_reward"
@@ -83,11 +85,22 @@ export interface ProfileModerationLog {
 export interface School {
   id: string;
   name: string;
-  address: string;
+  address: string | null;
   latitude: number;
   longitude: number;
   radius_m: number;
   timezone: string;
+  slug: string | null;
+  school_code: string | null;
+  description: string | null;
+  city: string | null;
+  province: string | null;
+  country_code: string | null;
+  logo_url: string | null;
+  brand_color: string | null;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string | null;
 }
 
 export interface Class {
@@ -95,6 +108,14 @@ export interface Class {
   school_id: string;
   name: string;
   grade_level: string;
+  section: string | null;
+  academic_year: string | null;
+  homeroom_teacher_id: string | null;
+  capacity: number;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string | null;
+  profiles?: Profile;
 }
 
 export interface Enrollment {
@@ -134,6 +155,13 @@ export interface AttendanceLog {
   admin_note: string | null;
   device_info: string | null;
   fraud_flags: string[] | null;
+  arrival_status?: ArrivalStatus | null;
+  policy_id?: string | null;
+  minutes_delta_from_start?: number | null;
+  penalty_applied?: boolean | null;
+  penalty_type?: string | null;
+  penalty_value?: number | null;
+  warning_count_added?: number | null;
   profiles?: Profile;
   classes?: Class;
 }
@@ -201,12 +229,37 @@ export interface WithdrawalRequest {
   admin_note: string | null;
   requested_at: string;
   processed_at: string | null;
+  
+  // Token verification fields
+  token_code?: string | null;
+  token_hash?: string | null;
+  token_issued_at?: string | null;
+  token_expires_at?: string | null;
+  redeemed_at?: string | null;
+  redeemed_by?: string | null;
+  redemption_method?: 'qr' | 'manual' | null;
+  payout_reference?: string | null;
+
   profiles?: Profile;
   wallets?: Wallet;
 }
 
+export interface PayoutRedemptionLog {
+  id: string;
+  withdrawal_request_id: string;
+  student_id: string;
+  admin_id?: string | null;
+  attempt_type: 'scan' | 'manual';
+  token_entered?: string | null;
+  result: 'success' | 'expired' | 'invalid' | 'already_used' | 'forbidden';
+  device_info?: string | null;
+  created_at: string;
+}
+
 export interface Badge {
   id: string;
+  school_id?: string | null;
+  class_id?: string | null;
   name: string;
   description: string;
   icon: string;
@@ -258,16 +311,62 @@ export interface Streak {
   updated_at: string;
 }
 
-export type HolidayType = 'national' | 'school' | 'exam';
+export type RecurrenceType = 'one_time' | 'weekly' | 'monthly' | 'yearly' | 'custom';
+
+export interface HolidayTag {
+  id: string;
+  school_id: string | null;
+  name: string;
+  icon_key: string | null;
+  color_hex: string;
+  is_preset: boolean;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface HolidayRule {
+  id: string;
+  school_id: string;
+  class_id?: string | null;
+  name: string;
+  description: string | null;
+  recurrence_type: RecurrenceType;
+  recurrence_value: Record<string, any> | null;
+  tag_id: string | null;
+  color_hex: string;
+  start_date: string;
+  end_date: string | null;
+  is_active: boolean;
+  applies_to: string;
+  pause_streaks: boolean;
+  pause_attendance: boolean;
+  hide_checkin: boolean;
+  show_banner: boolean;
+  created_by: string | null;
+  created_at: string;
+  holiday_tags?: HolidayTag | null;
+}
+
+export type HolidayType = 'national' | 'school' | 'exam' | RecurrenceType;
 
 export interface HolidayCalendar {
   id: string;
   school_id: string;
+  class_id?: string | null;
   date: string;
   name: string;
   type: HolidayType;
+  description?: string | null;
+  rule_id?: string | null;
+  tag_id?: string | null;
+  color_hex?: string | null;
+  pause_streaks?: boolean;
+  pause_attendance?: boolean;
+  hide_checkin?: boolean;
   created_by?: string;
   created_at: string;
+  holiday_rules?: HolidayRule | null;
+  holiday_tags?: HolidayTag | null;
 }
 
 export interface CoinTransaction {
@@ -282,6 +381,8 @@ export interface CoinTransaction {
 
 export interface ShopItem {
   id: string;
+  school_id?: string | null;
+  class_id?: string | null;
   cosmetic_id?: string | null;
   name: string;
   description?: string;
@@ -307,6 +408,8 @@ export interface Purchase {
 
 export interface Badge {
   id: string;
+  school_id?: string | null;
+  class_id?: string | null;
   name: string;
   description: string;
   icon: string;
@@ -327,6 +430,8 @@ export interface UserBadge {
 
 export interface Quest {
   id: string;
+  school_id?: string | null;
+  class_id?: string | null;
   title: string;
   description: string;
   type: 'daily' | 'weekly' | 'special';
@@ -394,3 +499,163 @@ export interface AppNotification {
   created_at: string;
   expires_at: string | null;
 }
+
+// ── Academic Management System Types ────────────────────────────────
+export interface SchoolAdminAssignment {
+  id: string;
+  school_id: string;
+  user_id: string;
+  assignment_role: "school_admin" | "staff_admin";
+  created_at?: string;
+  updated_at?: string;
+  profiles?: Profile;
+  schools?: School;
+}
+
+export interface Subject {
+  id: string;
+  school_id: string;
+  name: string;
+  code: string;
+  description: string | null;
+  credits: number;
+  color_code: string | null;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ClassSubject {
+  id: string;
+  school_id: string;
+  class_id: string;
+  subject_id: string;
+  is_required: boolean;
+  selection_group: string | null;
+  max_students: number | null;
+  term_id: string | null;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+  subjects?: Subject;
+  classes?: Class;
+}
+
+export interface StudentSubject {
+  id: string;
+  school_id: string;
+  student_id: string;
+  class_subject_id: string;
+  selection_status: "pending" | "approved" | "rejected";
+  assigned_by: "student" | "system" | "admin";
+  term_id: string | null;
+  created_at?: string;
+  updated_at?: string;
+  profiles?: Profile;
+  class_subjects?: ClassSubject;
+}
+
+export interface TeacherSubjectAssignment {
+  id: string;
+  school_id: string;
+  teacher_id: string;
+  class_subject_id: string;
+  created_at?: string;
+  updated_at?: string;
+  profiles?: Profile;
+  class_subjects?: ClassSubject;
+}
+
+export interface ClassSubjectPolicy {
+  id: string;
+  school_id: string;
+  class_id: string;
+  selection_start_date: string | null;
+  selection_end_date: string | null;
+  min_electives: number;
+  max_electives: number;
+  auto_enroll_required: boolean;
+  term_id: string | null;
+  selection_locked: boolean;
+  created_at?: string;
+  updated_at?: string;
+  classes?: Class;
+}
+
+export interface AcademicTerm {
+  id: string;
+  school_id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  is_active: boolean;
+  created_at?: string;
+}
+
+export interface SchoolPeriod {
+  id: string;
+  school_id: string;
+  day_index: number;
+  period_order: number;
+  label: string;
+  start_time: string;
+  end_time: string;
+  is_break: boolean;
+  term_id: string | null;
+  created_at?: string;
+}
+
+export interface ClassScheduleSession {
+  id: string;
+  school_id: string;
+  class_id: string;
+  subject_id: string;
+  teacher_id: string | null;
+  period_id: string;
+  room_name: string | null;
+  is_active: boolean;
+  term_id: string | null;
+  created_at?: string;
+  subjects?: Subject;
+  classes?: Class;
+  profiles?: Profile;
+  school_periods?: SchoolPeriod;
+}
+
+export interface StudentSchedulePreference {
+  id: string;
+  student_id: string;
+  default_view: "weekly" | "daily";
+  reminder_enabled: boolean;
+  favorite_subject_ids: string[];
+  color_mode: "subject" | "teacher" | "room";
+  created_at?: string;
+}
+
+export interface AttendancePolicy {
+  id: string;
+  school_id: string;
+  class_id: string | null;
+  schedule_id: string | null;
+  name: string;
+  checkin_open_at: string;
+  early_start_at: string;
+  early_end_at: string;
+  normal_start_at: string;
+  normal_end_at: string;
+  late_start_at: string;
+  late_end_at: string;
+  absent_after_at: string;
+  late_enabled: boolean;
+  late_grace_minutes: number;
+  late_penalty_type: string | null;
+  late_penalty_value: number | null;
+  late_escalation_count: number | null;
+  late_escalation_action: string | null;
+  is_active: boolean;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+

@@ -20,12 +20,15 @@ import {
 } from "lucide-react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay } from "date-fns";
 import type { AttendanceLog } from "@/lib/types/database";
+import { HolidayTag } from "@/components/shared/holiday-tag";
 
 interface Holiday {
   id: string;
   date: string;
   name: string;
   description: string | null;
+  color_hex?: string | null;
+  tag_id?: string | null;
 }
 
 export default function AttendanceHistoryPage() {
@@ -38,6 +41,9 @@ export default function AttendanceHistoryPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
   const [selectedDateStr, setSelectedDateStr] = useState<string>("");
+  const [rewardRules, setRewardRules] = useState<{ attendance_start_time: string; attendance_end_time: string; economy_config?: any } | null>(null);
+  const [activePolicy, setActivePolicy] = useState<any>(null);
+  const [tags, setTags] = useState<any[]>([]);
 
   useEffect(() => {
     if (!profile) return;
@@ -45,29 +51,80 @@ export default function AttendanceHistoryPage() {
     
     async function load() {
       setLoading(true);
+      
+      // Fetch school enrollment to get school_id
+      const { data: enr } = await supabase
+        .from("enrollments")
+        .select("class_id, classes(school_id)")
+        .eq("student_id", profile!.id)
+        .limit(1)
+        .maybeSingle();
+
+      let schoolId = null;
+      let classId = null;
+      if (enr) {
+        schoolId = (enr.classes as any)?.school_id;
+        classId = enr.class_id;
+      }
+
       const start = startOfMonth(currentMonth);
       const end = endOfMonth(currentMonth);
       
       const startStr = format(start, "yyyy-MM-dd");
       const endStr = format(end, "yyyy-MM-dd");
 
-      const [attendanceRes, holidaysRes] = await Promise.all([
+      const [attendanceRes, holidaysRes, rulesRes, policyRes, tagsRes] = await Promise.all([
         supabase
           .from("attendance_logs")
           .select("*")
           .eq("student_id", profile!.id)
           .gte("attendance_date", startStr)
           .lte("attendance_date", endStr),
-        supabase
-          .from("holiday_calendar")
-          .select("*")
-          .gte("date", startStr)
-          .lte("date", endStr)
+        schoolId 
+          ? supabase
+              .from("holiday_calendar")
+              .select("*")
+              .eq("school_id", schoolId)
+              .gte("date", startStr)
+              .lte("date", endStr)
+          : supabase
+              .from("holiday_calendar")
+              .select("*")
+              .gte("date", startStr)
+              .lte("date", endStr),
+        schoolId 
+          ? supabase
+              .from("reward_rules")
+              .select("attendance_start_time, attendance_end_time, economy_config")
+              .eq("school_id", schoolId)
+              .maybeSingle()
+          : Promise.resolve({ data: null }),
+        schoolId
+          ? supabase
+              .from("attendance_policies")
+              .select("*")
+              .eq("is_active", true)
+              .eq("school_id", schoolId)
+              .or(`class_id.eq.${classId || '00000000-0000-0000-0000-000000000000'},class_id.is.null`)
+              .order("priority", { ascending: false })
+              .limit(1)
+              .maybeSingle()
+          : Promise.resolve({ data: null }),
+        supabase.from("holiday_tags").select("*")
       ]);
 
       const attLogs = (attendanceRes.data || []) as AttendanceLog[];
       setLogs(attLogs);
       setHolidays((holidaysRes.data || []) as Holiday[]);
+      if (tagsRes && tagsRes.data) {
+        setTags(tagsRes.data);
+      }
+      if (rulesRes && rulesRes.data) {
+        setRewardRules(rulesRes.data);
+      }
+      if (policyRes && policyRes.data) {
+        setActivePolicy(policyRes.data);
+      }
       setLoading(false);
 
       // Auto-select a date inside the month
@@ -140,15 +197,73 @@ export default function AttendanceHistoryPage() {
     return logStatus === filter;
   };
 
-  // Month-specific stats
-  const stats = {
-    approved: logs.filter(l => l.status === "approved").length,
-    pending: logs.filter(l => l.status.startsWith("pending_")).length,
-    rejected: logs.filter(l => l.status === "rejected").length,
+  // Month-specific stats (counting absences as rejected/absent)
+  const getMonthlyStats = () => {
+    let absentCount = 0;
+    const todayStr = format(new Date(), "yyyy-MM-dd");
+    const nowTime = new Date();
+    const timeStr = `${String(nowTime.getHours()).padStart(2, "0")}:${String(nowTime.getMinutes()).padStart(2, "0")}`;
+
+    days.forEach(day => {
+      const dateStr = format(day, "yyyy-MM-dd");
+      const log = logs.find(a => a.attendance_date === dateStr);
+      const holiday = holidays.find(h => h.date === dateStr);
+      const activeDays = activePolicy?.active_days || rewardRules?.economy_config?.active_days || [1, 2, 3, 4, 5];
+      const isWeekend = !activeDays.includes(day.getDay());
+      const endTime = activePolicy ? (activePolicy.absent_after_at || activePolicy.late_end_at) : rewardRules?.attendance_end_time;
+
+      let hasDatePassed = false;
+      if (dateStr < todayStr) {
+        hasDatePassed = true;
+      } else if (dateStr === todayStr && endTime) {
+        if (timeStr > endTime) {
+          hasDatePassed = true;
+        }
+      }
+
+      if (!log && !holiday && !isWeekend && hasDatePassed) {
+        absentCount++;
+      }
+    });
+
+    return {
+      approved: logs.filter(l => l.status === "approved").length,
+      pending: logs.filter(l => l.status.startsWith("pending_")).length,
+      rejected: logs.filter(l => l.status === "rejected").length + absentCount,
+    };
   };
 
-  // Get selected day info
-  const selectedLog = logs.find(log => log.attendance_date === selectedDateStr);
+  const stats = getMonthlyStats();
+
+  // Get selected day info (including holiday or absence check)
+  const getSelectedDateStatus = () => {
+    if (!selectedDateStr) return { isHoliday: false, isAbsent: false, log: null };
+    const log = logs.find(l => l.attendance_date === selectedDateStr);
+    if (log) return { isHoliday: false, isAbsent: false, log };
+    const holiday = holidays.find(h => h.date === selectedDateStr);
+    if (holiday) return { isHoliday: true, isAbsent: false, holiday };
+
+    const dateObj = new Date(selectedDateStr);
+    const activeDays = activePolicy?.active_days || rewardRules?.economy_config?.active_days || [1, 2, 3, 4, 5];
+    const isWeekend = !activeDays.includes(dateObj.getDay());
+    const todayStr = format(new Date(), "yyyy-MM-dd");
+    const endTime = activePolicy ? (activePolicy.absent_after_at || activePolicy.late_end_at) : rewardRules?.attendance_end_time;
+    let hasDatePassed = false;
+    if (selectedDateStr < todayStr) {
+      hasDatePassed = true;
+    } else if (selectedDateStr === todayStr && endTime) {
+      const nowTime = new Date();
+      const timeStr = `${String(nowTime.getHours()).padStart(2, "0")}:${String(nowTime.getMinutes()).padStart(2, "0")}`;
+      if (timeStr > endTime) {
+        hasDatePassed = true;
+      }
+    }
+
+    const isAbsent = !isWeekend && hasDatePassed;
+    return { isHoliday: false, isAbsent, log: null, isWeekend };
+  };
+
+  const { isHoliday: isSelHoliday, isAbsent: isSelAbsent, log: selectedLog, isWeekend: isSelWeekend } = getSelectedDateStatus();
   const selectedHoliday = holidays.find(h => h.date === selectedDateStr);
   const isSelectedDateToday = selectedDateStr === format(new Date(), "yyyy-MM-dd");
 
@@ -269,46 +384,108 @@ export default function AttendanceHistoryPage() {
                   const isSelected = selectedDateStr === dateStr;
                   const isToday = format(new Date(), "yyyy-MM-dd") === dateStr;
 
+                  const activeDays = activePolicy?.active_days || rewardRules?.economy_config?.active_days || [1, 2, 3, 4, 5];
+                  const isWeekend = !activeDays.includes(day.getDay());
+                  const todayStr = format(new Date(), "yyyy-MM-dd");
+                  const endTime = activePolicy ? (activePolicy.absent_after_at || activePolicy.late_end_at) : rewardRules?.attendance_end_time;
+                  
+                  let hasDatePassed = false;
+                  if (dateStr < todayStr) {
+                    hasDatePassed = true;
+                  } else if (dateStr === todayStr && endTime) {
+                    const nowTime = new Date();
+                    const timeStr = `${String(nowTime.getHours()).padStart(2, "0")}:${String(nowTime.getMinutes()).padStart(2, "0")}`;
+                    if (timeStr > endTime) {
+                      hasDatePassed = true;
+                    }
+                  }
+
+                  const isAbsent = !log && !holiday && !isWeekend && hasDatePassed;
+
                   let cellClass = "bg-muted/20 border-border/30 hover:border-border/60 hover:bg-muted/30 text-foreground/90";
                   let dotColor = null;
+                  let cellStyle: React.CSSProperties = {};
+                  let dotStyle: React.CSSProperties = {};
 
                   if (holiday) {
-                    cellClass = "bg-sky-500/10 border-sky-500/20 text-sky-700 dark:text-sky-400 hover:bg-sky-500/20 hover:border-sky-500/40";
-                    dotColor = "bg-sky-500";
+                    const color = holiday?.color_hex || "#3b82f6";
+                    cellClass = "hover:scale-[1.03] transition-all font-semibold";
+                    cellStyle = {
+                      backgroundColor: `${color}15`,
+                      borderColor: `${color}35`,
+                      color: color
+                    };
+                    dotColor = "custom";
+                    dotStyle = { backgroundColor: color };
+                  } else if (isWeekend) {
+                    cellClass = "hover:scale-[1.03] transition-all font-semibold";
+                    cellStyle = {
+                      backgroundColor: "#64748b15",
+                      borderColor: "#64748b35",
+                      color: "#64748b"
+                    };
+                    dotColor = "custom";
+                    dotStyle = { backgroundColor: "#64748b" };
                   } else if (log) {
                     const activeMatch = matchesFilter(log.status);
 
                     if (activeMatch) {
                       if (log.status === 'approved') {
-                        cellClass = "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20 hover:border-emerald-500/40 font-semibold";
-                        dotColor = "bg-emerald-500";
+                        // Use the new arrival_status if it exists, fallback to old logic
+                        const arrivalStatus = log.arrival_status || 
+                          (log.before_early_cutoff ? 'early' : 
+                          (log.within_time_window === false ? 'late' : 'normal'));
+                          
+                        if (arrivalStatus === 'early') {
+                          cellClass = "bg-purple-500/10 border-purple-500/20 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20 hover:border-purple-500/40 font-semibold";
+                          dotColor = "bg-purple-500";
+                        } else if (arrivalStatus === 'normal') {
+                          cellClass = "bg-success/10 border-success/20 text-success hover:bg-success/20 hover:border-success/40 font-semibold";
+                          dotColor = "bg-success";
+                        } else if (arrivalStatus === 'late') {
+                          cellClass = "bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-500 hover:bg-amber-500/20 hover:border-amber-500/40 font-semibold";
+                          dotColor = "bg-amber-500";
+                        } else if (arrivalStatus === 'absent') {
+                          cellClass = "bg-destructive/10 border-destructive/20 text-destructive hover:bg-destructive/20 hover:border-destructive/40 font-semibold";
+                          dotColor = "bg-destructive";
+                        }
                       } else if (log.status === 'rejected') {
                         cellClass = "bg-rose-500/10 border-rose-500/20 text-rose-700 dark:text-rose-400 hover:bg-rose-500/20 hover:border-rose-500/40 font-semibold";
                         dotColor = "bg-rose-500";
                       } else {
                         // Pending statuses: pending_teacher_view / pending_admin_review
-                        cellClass = "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 hover:border-amber-500/40 font-semibold";
-                        dotColor = "bg-amber-500";
+                        cellClass = "bg-yellow-500/10 border-yellow-500/20 text-yellow-600 dark:text-yellow-400 hover:bg-yellow-500/20 hover:border-yellow-500/40 font-semibold";
+                        dotColor = "bg-yellow-500";
                       }
                     } else {
                       // Log exists but does not match active filter -> render dimmed
                       cellClass = "bg-muted/10 border-border/10 text-muted-foreground/30 hover:bg-muted/15 hover:border-border/20";
                       dotColor = "bg-muted-foreground/30";
                     }
+                  } else if (isAbsent) {
+                    const activeMatch = (filter === "all" || filter === "rejected");
+                    if (activeMatch) {
+                      cellClass = "bg-rose-500/10 border-rose-500/20 text-rose-700 dark:text-rose-400 hover:bg-rose-500/20 hover:border-rose-500/40 font-semibold";
+                      dotColor = "bg-rose-500";
+                    } else {
+                      cellClass = "bg-muted/10 border-border/10 text-muted-foreground/30 hover:bg-muted/15 hover:border-border/20";
+                      dotColor = "bg-muted-foreground/30";
+                    }
                   }
 
-                  return (
+                   return (
                     <button
                       key={dateStr}
                       onClick={() => setSelectedDateStr(dateStr)}
                       className={cn(
-                        "aspect-square p-2 border rounded-2xl transition-all duration-200 flex flex-col justify-between items-start cursor-pointer group relative overflow-hidden",
+                        "aspect-square p-2 border rounded-2xl transition-all duration-200 flex flex-col justify-between items-start cursor-pointer group relative overflow-visible",
                         isSelected 
-                          ? "ring-2 ring-primary border-primary scale-102 bg-primary/5 shadow-md shadow-primary/5 z-10" 
-                          : "hover:scale-102 hover:shadow-sm",
+                          ? "ring-2 ring-primary border-primary scale-[1.03] bg-primary/5 shadow-md shadow-primary/5 z-20" 
+                          : "hover:scale-[1.03] hover:shadow-md hover:z-20",
                         isToday && !isSelected && "ring-1 ring-muted-foreground/40",
                         cellClass
                       )}
+                      style={cellStyle}
                     >
                       <span className={cn(
                         "text-xs font-semibold select-none", 
@@ -317,15 +494,63 @@ export default function AttendanceHistoryPage() {
                         {format(day, "d")}
                       </span>
 
+                      {holiday && holiday.tag_id && (() => {
+                        const tag = tags.find(t => t.id === holiday.tag_id);
+                        if (!tag) return null;
+                        return (
+                          <div className="mt-auto pt-1 pointer-events-none overflow-hidden w-full flex">
+                            <HolidayTag 
+                              name={tag.name} 
+                              colorHex={tag.color_hex}
+                              className="text-[8px] px-1 py-0 truncate max-w-full"
+                            />
+                          </div>
+                        );
+                      })()}
+
                       {dotColor && (
-                        <span className={cn(
-                          "absolute bottom-2 right-2 w-1.5 h-1.5 rounded-full transition-transform duration-300 group-hover:scale-125",
-                          dotColor
-                        )} />
+                        <span 
+                          className={cn(
+                            "absolute top-2 right-2 w-1.5 h-1.5 rounded-full transition-transform duration-300 group-hover:scale-125",
+                            dotColor === "custom" ? "" : dotColor
+                          )}
+                          style={dotStyle}
+                        />
                       )}
                     </button>
                   );
                 })}
+              </div>
+
+              <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 pt-4 border-t border-border/20 text-[10px] sm:text-xs select-none font-semibold">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-purple-500 shadow-sm shadow-purple-500/25" />
+                  <span className="text-muted-foreground">Early</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-success shadow-sm shadow-success/25" />
+                  <span className="text-muted-foreground">Normal</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 shadow-sm shadow-amber-500/25" />
+                  <span className="text-muted-foreground">{t.adminCalendar.late}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-yellow-500 shadow-sm shadow-yellow-500/25" />
+                  <span className="text-muted-foreground">{t.history.filters.pending}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-rose-500 shadow-sm shadow-rose-500/25" />
+                  <span className="text-muted-foreground">{t.history.filters.rejected} / Absent</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-sky-500 shadow-sm shadow-sky-500/25" />
+                  <span className="text-muted-foreground">{t.adminCalendar.holidayClosure}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-slate-500 shadow-sm shadow-slate-500/25" />
+                  <span className="text-muted-foreground">Weekend</span>
+                </div>
               </div>
             </div>
           )}
@@ -369,10 +594,30 @@ export default function AttendanceHistoryPage() {
                   </div>
                 </div>
 
-                {selectedLog.before_early_cutoff && (
-                  <div className="flex items-center gap-2 p-3 rounded-2xl text-xs bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400">
-                    <span className="text-sm">🌅</span>
+                {/* Arrival Status Panels */}
+                {(selectedLog.arrival_status === 'early' || (!selectedLog.arrival_status && selectedLog.before_early_cutoff)) && (
+                  <div className="flex items-center gap-2 p-3 rounded-2xl text-xs bg-purple-500/10 border border-purple-500/20 text-purple-600 dark:text-purple-400">
+                    <span className="text-sm">🌟</span>
                     <span className="font-semibold">{t.history.early}</span>
+                  </div>
+                )}
+                {(selectedLog.arrival_status === 'normal' || (!selectedLog.arrival_status && selectedLog.status === 'approved' && selectedLog.within_time_window !== false && !selectedLog.before_early_cutoff)) && (
+                  <div className="flex items-center gap-2 p-3 rounded-2xl text-xs bg-success/10 border border-success/20 text-success">
+                    <span className="text-sm">✓</span>
+                    <span className="font-semibold">{t.history.onTime}</span>
+                  </div>
+                )}
+                {(selectedLog.arrival_status === 'late' || (!selectedLog.arrival_status && selectedLog.status === 'approved' && selectedLog.within_time_window === false)) && (
+                  <div className="flex flex-col gap-1.5 p-3 rounded-2xl text-xs bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-500">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">⏰</span>
+                      <span className="font-semibold">{t.history.late}</span>
+                    </div>
+                    {selectedLog.penalty_applied && (
+                      <div className="text-[10px] font-bold opacity-80 uppercase tracking-wider">
+                        Penalty: -{selectedLog.penalty_value} {selectedLog.penalty_type?.replace('_', ' ')}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -409,23 +654,67 @@ export default function AttendanceHistoryPage() {
               )}
             </div>
           ) : selectedHoliday ? (
-            <div className="space-y-4 py-4 text-center">
-              <div className="inline-flex p-3 bg-sky-500/10 text-sky-500 rounded-full">
+            <div className="space-y-4 py-4 text-center animate-fade-in">
+              <div 
+                className="inline-flex p-3 rounded-full"
+                style={{
+                  backgroundColor: `${selectedHoliday.color_hex || "#3b82f6"}15`,
+                  color: selectedHoliday.color_hex || "#3b82f6"
+                }}
+              >
                 <CalendarIcon className="h-6 w-6" />
               </div>
               <div className="space-y-1.5 px-2">
-                <h4 className="font-bold text-sm text-sky-600 dark:text-sky-400">
+                <h4 
+                  className="font-bold text-sm"
+                  style={{ color: selectedHoliday.color_hex || "#3b82f6" }}
+                >
                   {selectedHoliday.name}
                 </h4>
-                {selectedHoliday.description && (
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    {selectedHoliday.description}
-                  </p>
-                )}
+                {selectedHoliday.tag_id && (() => {
+                  const tag = tags.find(t => t.id === selectedHoliday.tag_id);
+                  if (!tag) return null;
+                  return (
+                    <div className="flex justify-center mt-1">
+                      <HolidayTag name={tag.name} colorHex={tag.color_hex} />
+                    </div>
+                  );
+                })()}
+                <p className="text-xs text-muted-foreground leading-relaxed mt-2">
+                  {selectedHoliday.description || "School is closed today. Streak protection is active."}
+                </p>
+              </div>
+            </div>
+          ) : isSelWeekend ? (
+            <div className="space-y-4 py-4 text-center animate-fade-in">
+              <div className="inline-flex p-3 rounded-full bg-slate-500/10 text-slate-500">
+                <CalendarIcon className="h-6 w-6" />
+              </div>
+              <div className="space-y-1.5 px-2">
+                <h4 className="font-bold text-sm text-slate-600 dark:text-slate-400">
+                  Weekend
+                </h4>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Not an active school day.
+                </p>
+              </div>
+            </div>
+          ) : isSelAbsent ? (
+            <div className="space-y-4 py-8 text-center animate-fade-in">
+              <div className="inline-flex p-3 bg-rose-500/10 text-rose-500 rounded-full">
+                <XCircle className="h-6 w-6" />
+              </div>
+              <div className="space-y-1.5 px-2">
+                <h4 className="font-bold text-sm text-rose-600 dark:text-rose-400">
+                  Absent
+                </h4>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  You did not log attendance before the check-in window closed.
+                </p>
               </div>
             </div>
           ) : (
-            <div className="space-y-4 py-8 text-center">
+            <div className="space-y-4 py-8 text-center animate-fade-in">
               <div className="inline-flex p-3 bg-muted/40 text-muted-foreground rounded-full">
                 <AlertCircle className="h-6 w-6" />
               </div>

@@ -1,15 +1,19 @@
-"use client";
-
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Profile, UserRole } from "@/lib/types/database";
+import { useUserRoleContext } from "@/components/providers/user-role-provider";
 
 export function useUserRole() {
+  const context = useUserRoleContext();
+  
   const [profile, setProfile] = useState<Profile | null>(null);
   const [role, setRole] = useState<UserRole | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // If context provider is active, skip direct Supabase fetch
+    if (context) return;
+
     const supabase = createClient();
 
     async function fetchProfile() {
@@ -78,7 +82,12 @@ export function useUserRole() {
     return () => {
       window.removeEventListener("profile-updated", handleProfileUpdate);
     };
-  }, []);
+  }, [context]);
+
+  // Return context if provider is active
+  if (context) {
+    return context;
+  }
 
   return { profile, role, loading };
 }

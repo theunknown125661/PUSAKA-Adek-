@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useTranslation } from "@/lib/i18n/use-translation";
 import { useUserRole } from "@/lib/hooks/use-user-role";
@@ -11,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import AvatarDisplay from "@/components/profile/avatar-display";
+import { ScheduleComponent } from "./schedule-component";
 
 const COLOR_OPTIONS = [
   { name: "Blue", key: "blue", class: "from-blue-500 to-indigo-600 bg-blue-500/10 text-blue-500 text-blue-300 border-blue-500/30" },
@@ -60,22 +62,15 @@ export default function StudentClassPage() {
   const [teachers, setTeachers] = useState<any[]>([]);
   const [rewardRules, setRewardRules] = useState<any>(null);
 
-  // Dynamic branding and schedules
   const [schoolColor, setSchoolColor] = useState<string>("indigo");
   const [classColor, setClassColor] = useState<string>("indigo");
-  const [classSchedule, setClassSchedule] = useState<DaySchedule[]>([]);
+  const [subjectLegends, setSubjectLegends] = useState<any[]>([]);
 
   // Selection/editing states
   const [selectedSchoolId, setSelectedSchoolId] = useState<string>("");
   const [selectedClassId, setSelectedClassId] = useState<string>("");
   const [loadingEnrollment, setLoadingEnrollment] = useState<boolean>(false);
   const [isEditing, setIsEditing] = useState<boolean>(false);
-
-  // View states for schedule
-  const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
-  const [timeScope, setTimeScope] = useState<"daily" | "weekly" | "monthly">("weekly");
-  const [selectedDayIndex, setSelectedDayIndex] = useState<number>(0);
-  const [selectedMonthOffset, setSelectedMonthOffset] = useState<number>(0);
 
   const loadData = async () => {
     setLoading(true);
@@ -142,57 +137,7 @@ export default function StudentClassPage() {
           .select("key, value")
           .eq("school_id", schoolId);
 
-        // Prepopulate default schedule with current teacher's name
-        const teacherName = (teachersRes?.[0]?.profiles as any)?.full_name || "Assigning...";
-        const defaultSched = [
-          { day: "Monday", slots: [
-            { time: "08:00 - 09:30", subject: "Mathematics", teacher: teacherName, color: "blue" },
-            { time: "09:45 - 11:15", subject: "Science", teacher: teacherName, color: "purple" }
-          ]},
-          { day: "Tuesday", slots: [
-            { time: "08:00 - 09:30", subject: "English Literature", teacher: teacherName, color: "amber" },
-            { time: "09:45 - 11:15", subject: "World History", teacher: teacherName, color: "teal" }
-          ]},
-          { day: "Wednesday", slots: [
-            { time: "08:00 - 09:30", subject: "Science Lab", teacher: teacherName, color: "purple" },
-            { time: "09:45 - 11:15", subject: "Creative Arts", teacher: teacherName, color: "rose" }
-          ]},
-          { day: "Thursday", slots: [
-            { time: "08:00 - 09:30", subject: "Mathematics", teacher: teacherName, color: "blue" },
-            { time: "09:45 - 11:15", subject: "English Composition", teacher: teacherName, color: "amber" }
-          ]},
-          { day: "Friday", slots: [
-            { time: "08:00 - 09:30", subject: "Physical Education", teacher: "Coach Carter", color: "cyan" },
-            { time: "09:45 - 11:15", subject: "Weekly Review & Quiz", teacher: teacherName, color: "indigo" }
-          ]}
-        ];
-
-        let loadedSchedule = defaultSched;
-        let sColor = "indigo";
-        let cColor = "indigo";
-
-        if (settingsData) {
-          const settingsMap: Record<string, string> = {};
-          settingsData.forEach(item => {
-            settingsMap[item.key] = item.value;
-          });
-          
-          sColor = settingsMap[`school_color_code_${schoolId}`] || "indigo";
-          cColor = settingsMap[`class_color_code_${classId}`] || "indigo";
-          
-          const schedVal = settingsMap[`class_schedule_${classId}`];
-          if (schedVal) {
-            try {
-              loadedSchedule = JSON.parse(schedVal);
-            } catch (err) {
-              console.error("Failed to parse dynamic class schedule:", err);
-            }
-          }
-        }
         
-        setSchoolColor(sColor);
-        setClassColor(cColor);
-        setClassSchedule(loadedSchedule);
 
         // Prepopulate dropdowns
         setSelectedSchoolId(schoolId || "");
@@ -368,432 +313,7 @@ export default function StudentClassPage() {
   };
 
   // Render helpers for Schedule component
-  const renderScheduleContent = () => {
-    if (viewMode === "list") {
-      if (timeScope === "daily") {
-        const currentDaySched = classSchedule[selectedDayIndex];
-        if (!currentDaySched || !currentDaySched.slots || currentDaySched.slots.length === 0) {
-          return (
-            <div className="space-y-4 animate-fade-in">
-              <div className="flex gap-2 border-b border-border/40 pb-2 overflow-x-auto no-scrollbar">
-                {daysOfWeekNames.map((dayName, idx) => (
-                  <button
-                    key={dayName}
-                    type="button"
-                    onClick={() => setSelectedDayIndex(idx)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-                      selectedDayIndex === idx
-                        ? "bg-primary/10 text-primary border border-primary/20"
-                        : "bg-muted/40 text-muted-foreground hover:text-foreground border border-transparent"
-                    }`}
-                  >
-                    {dayName}
-                  </button>
-                ))}
-              </div>
-              <div className="text-center py-8 text-xs text-muted-foreground border border-dashed border-border/60 rounded-2xl bg-muted/5">
-                No classes scheduled for {daysOfWeekNames[selectedDayIndex]}.
-              </div>
-            </div>
-          );
-        }
-        return (
-          <div className="space-y-4 animate-fade-in">
-            {/* Day Selector Tabs */}
-            <div className="flex gap-2 border-b border-border/40 pb-2 overflow-x-auto no-scrollbar">
-              {daysOfWeekNames.map((dayName, idx) => (
-                <button
-                  key={dayName}
-                  type="button"
-                  onClick={() => setSelectedDayIndex(idx)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-                    selectedDayIndex === idx
-                      ? "bg-primary/10 text-primary border border-primary/20"
-                      : "bg-muted/40 text-muted-foreground hover:text-foreground border border-transparent"
-                  }`}
-                >
-                  {dayName}
-                </button>
-              ))}
-            </div>
-
-            <div className="space-y-3">
-              {currentDaySched.slots.map((slot, index) => {
-                const colorClasses = resolveSlotColor(slot.color).split(" ");
-                const bgBorderClasses = colorClasses.filter(c => c.startsWith("bg-") || c.startsWith("border-")).join(" ");
-                const textClasses = colorClasses.find(c => c.startsWith("text-") && !c.includes("300")) || "text-primary";
-                return (
-                  <div
-                    key={index}
-                    className={`flex items-center justify-between p-4 rounded-2xl border transition-all hover:opacity-90 ${bgBorderClasses}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`h-2.5 w-2.5 rounded-full bg-gradient-to-br ${colorClasses.slice(0, 2).join(" ")}`} />
-                      <div>
-                        <p className={`font-bold text-sm ${textClasses}`}>{slot.subject}</p>
-                        <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                          <User className="h-3 w-3" /> {slot.teacher}
-                        </p>
-                      </div>
-                    </div>
-                    <span className={`text-xs font-bold flex items-center gap-1 bg-background border px-2.5 py-1 rounded-lg ${textClasses}`}>
-                      <Clock className="h-3 w-3" /> {slot.time}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      } else if (timeScope === "weekly") {
-        const colorMap: Record<string, string> = {
-          blue: "border-l-blue-500 bg-blue-500/5",
-          purple: "border-l-purple-500 bg-purple-500/5",
-          amber: "border-l-amber-500 bg-amber-500/5",
-          teal: "border-l-teal-500 bg-teal-500/5",
-          rose: "border-l-rose-500 bg-rose-500/5",
-          cyan: "border-l-cyan-500 bg-cyan-500/5",
-          indigo: "border-l-indigo-500 bg-indigo-500/5",
-          emerald: "border-l-emerald-500 bg-emerald-500/5",
-          orange: "border-l-orange-500 bg-orange-500/5",
-          pink: "border-l-pink-500 bg-pink-500/5"
-        };
-        return (
-          <div className="space-y-4 animate-fade-in">
-            {classSchedule.map((sched) => (
-              <div key={sched.day} className="border border-border/60 rounded-xl overflow-hidden bg-muted/10">
-                <div className="bg-muted/60 px-4 py-2 font-bold text-xs border-b border-border/40 text-foreground flex justify-between items-center">
-                  <span>{sched.day}</span>
-                  <span className="text-[10px] text-muted-foreground font-normal">{(sched.slots || []).length} classes</span>
-                </div>
-                <div className="divide-y divide-border/40">
-                  {(sched.slots || []).length === 0 ? (
-                    <div className="px-4 py-3 text-xs text-muted-foreground italic">
-                      No classes scheduled.
-                    </div>
-                  ) : (
-                    sched.slots.map((slot, idx) => {
-                      const colorClasses = resolveSlotColor(slot.color).split(" ");
-                      const textClasses = colorClasses.find(c => c.startsWith("text-") && !c.includes("300")) || "text-primary";
-                      const baseColorName = colorClasses[0].split("-")[1] || "indigo";
-                      const borderLeftClass = colorMap[baseColorName] || "border-l-primary bg-primary/5";
-                      return (
-                        <div key={idx} className={`px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-sm border-l-4 ${borderLeftClass}`}>
-                          <div className="flex items-center gap-2">
-                            <span className={`h-2.5 w-2.5 rounded-full bg-gradient-to-br ${colorClasses.slice(0, 2).join(" ")}`} />
-                            <span className={`font-semibold ${textClasses}`}>{slot.subject}</span>
-                          </div>
-                          <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                            <span className="flex items-center gap-1">
-                              <Clock className="h-3 w-3" /> {slot.time}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <User className="h-3 w-3" /> {slot.teacher}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        );
-      } else {
-        const currentMonthDate = new Date();
-        currentMonthDate.setMonth(currentMonthDate.getMonth() + selectedMonthOffset);
-        const year = currentMonthDate.getFullYear();
-        const month = currentMonthDate.getMonth();
-        
-        const totalDays = new Date(year, month + 1, 0).getDate();
-        const weekdays = [];
-        const monthName = currentMonthDate.toLocaleString("default", { month: "long" });
-
-        for (let d = 1; d <= totalDays; d++) {
-          const dateObj = new Date(year, month, d);
-          const dayOfWeek = dateObj.getDay();
-          if (dayOfWeek !== 0 && dayOfWeek !== 6) { // Mon-Fri
-            weekdays.push({
-              dayNumber: d,
-              dayName: dateObj.toLocaleDateString("default", { weekday: "short" }),
-              schedule: classSchedule[dayOfWeek - 1],
-              dateString: `${d} ${monthName.slice(0, 3)}`
-            });
-          }
-        }
-
-        return (
-          <div className="space-y-4 animate-fade-in">
-            {/* Month Selector */}
-            <div className="flex items-center justify-between pb-2 border-b border-border/40">
-              <button
-                type="button"
-                onClick={() => setSelectedMonthOffset(prev => prev - 1)}
-                className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:text-foreground transition-all"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <span className="text-xs font-bold uppercase tracking-wider">{monthName} {year}</span>
-              <button
-                type="button"
-                onClick={() => setSelectedMonthOffset(prev => prev + 1)}
-                className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:text-foreground transition-all"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="max-h-[350px] overflow-y-auto pr-1 space-y-3 no-scrollbar">
-              {weekdays.map((dayData, idx) => (
-                <div key={idx} className="flex gap-4 p-3 rounded-xl bg-muted/20 border border-border/40 hover:bg-muted/30 transition-colors">
-                  <div className="flex flex-col items-center justify-center h-12 w-12 rounded-xl bg-primary/10 text-primary shrink-0 border border-primary/20">
-                    <span className="text-xs font-black">{dayData.dayNumber}</span>
-                    <span className="text-[9px] uppercase font-bold text-muted-foreground">{dayData.dayName}</span>
-                  </div>
-                  <div className="flex-1 space-y-1.5">
-                    {!dayData.schedule || !dayData.schedule.slots || dayData.schedule.slots.length === 0 ? (
-                      <span className="text-[10px] text-muted-foreground italic">No classes scheduled</span>
-                    ) : (
-                      dayData.schedule.slots.map((slot, sIdx) => {
-                        const colorClasses = resolveSlotColor(slot.color).split(" ");
-                        const textClasses = colorClasses.find(c => c.startsWith("text-") && !c.includes("300")) || "text-primary";
-                        return (
-                          <div key={sIdx} className="flex justify-between items-center text-xs">
-                            <span className="flex items-center gap-1.5">
-                              <span className={`h-1.5 w-1.5 rounded-full bg-gradient-to-br ${colorClasses.slice(0, 2).join(" ")}`} />
-                              <span className={`font-bold ${textClasses}`}>{slot.subject}</span>
-                            </span>
-                            <span className="text-muted-foreground text-[10px]">{slot.time.split(" ")[0]}</span>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      }
-    } else {
-      // CALENDAR VIEW
-      if (timeScope === "daily") {
-        const currentDaySched = classSchedule[selectedDayIndex];
-        const hasSlots = currentDaySched && currentDaySched.slots && currentDaySched.slots.length > 0;
-        return (
-          <div className="space-y-4 animate-fade-in">
-            {/* Day Selector Tabs */}
-            <div className="flex gap-2 border-b border-border/40 pb-2 overflow-x-auto no-scrollbar">
-              {daysOfWeekNames.map((dayName, idx) => (
-                <button
-                  key={dayName}
-                  type="button"
-                  onClick={() => setSelectedDayIndex(idx)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-                    selectedDayIndex === idx
-                      ? "bg-primary/10 text-primary border border-primary/20"
-                      : "bg-muted/40 text-muted-foreground hover:text-foreground border border-transparent"
-                  }`}
-                >
-                  {dayName}
-                </button>
-              ))}
-            </div>
-
-            {/* Vertical Time Rows */}
-            <div className="relative border border-border/40 rounded-2xl p-4 bg-muted/10 space-y-6 min-h-[300px] flex flex-col justify-between">
-              <div className="absolute left-[4.5rem] top-0 bottom-0 w-[1px] bg-border" />
-              
-              {[
-                { hour: "08:00" },
-                { hour: "09:00" },
-                { hour: "10:00" },
-                { hour: "11:00" },
-                { hour: "12:00" },
-              ].map((timeMarker, idx) => (
-                <div key={idx} className="flex gap-4 relative min-h-[3.5rem] items-start">
-                  <span className="w-12 text-[10px] text-muted-foreground text-right font-semibold pt-1">
-                    {timeMarker.hour}
-                  </span>
-                  <div className="flex-1 border-t border-border/20 pt-1" />
-                </div>
-              ))}
-
-              {/* Cards stacked vertically representing standard classes */}
-              <div className="absolute left-[5.5rem] right-4 top-4 bottom-4 flex flex-col gap-3 justify-center">
-                {!hasSlots ? (
-                  <div className="text-center text-xs text-muted-foreground italic">
-                    No classes scheduled for today.
-                  </div>
-                ) : (
-                  currentDaySched.slots.map((slot, index) => (
-                    <div
-                      key={index}
-                      className={`p-3.5 rounded-2xl bg-gradient-to-br ${resolveSlotColor(slot.color).split(" ").slice(0, 2).join(" ")} text-white shadow-md shadow-primary/5 border border-white/10`}
-                    >
-                      <div className="flex justify-between items-start">
-                        <p className="font-extrabold text-xs tracking-tight">{slot.subject}</p>
-                        <span className="text-[9px] font-bold bg-white/20 backdrop-blur-md px-2 py-0.5 rounded-full">
-                          {slot.time}
-                        </span>
-                      </div>
-                      <p className="text-[9px] text-white/80 mt-1.5 font-medium flex items-center gap-1">
-                        <User className="h-3 w-3" /> {slot.teacher}
-                      </p>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      } else if (timeScope === "weekly") {
-        return (
-          <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 animate-fade-in">
-            {classSchedule.map((sched) => (
-              <div
-                key={sched.day}
-                className="border border-border/50 bg-muted/10 rounded-2xl p-3 flex flex-col gap-3.5"
-              >
-                <div className="text-center pb-2 border-b border-border/40">
-                  <p className="font-extrabold text-xs text-foreground uppercase tracking-wider">{sched.day.slice(0, 3)}</p>
-                  <p className="text-[9px] text-muted-foreground mt-0.5">{(sched.slots || []).length} Classes</p>
-                </div>
-
-                <div className="flex-1 flex flex-col gap-2.5">
-                  {(sched.slots || []).length === 0 ? (
-                    <div className="text-center py-4 text-[10px] text-muted-foreground italic border border-dashed border-border/40 rounded-xl">
-                      Free
-                    </div>
-                  ) : (
-                    sched.slots.map((slot, idx) => {
-                      const colorClasses = resolveSlotColor(slot.color).split(" ");
-                      const bgBorderClasses = colorClasses.filter(c => c.startsWith("bg-") || c.startsWith("border-")).join(" ");
-                      const textClasses = colorClasses.find(c => c.startsWith("text-") && !c.includes("300")) || "text-primary";
-                      return (
-                        <div
-                          key={idx}
-                          className={`flex-1 min-h-[90px] p-2.5 rounded-xl border flex flex-col justify-between hover:shadow-md transition-all ${bgBorderClasses}`}
-                        >
-                          <div>
-                            <p className={`font-bold text-[10px] leading-tight line-clamp-2 ${textClasses}`}>{slot.subject}</p>
-                            <p className="text-[9px] text-muted-foreground mt-1 truncate">{slot.teacher.split(" ")[0]}</p>
-                          </div>
-                          <div className={`pt-2 border-t border-border/45 text-[9px] font-bold flex items-center gap-1 mt-2 ${textClasses}`}>
-                            <Clock className="h-2.5 w-2.5" />
-                            <span>{slot.time.split(" ")[0]}</span>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        );
-      } else {
-        const currentMonthDate = new Date();
-        currentMonthDate.setMonth(currentMonthDate.getMonth() + selectedMonthOffset);
-        const year = currentMonthDate.getFullYear();
-        const month = currentMonthDate.getMonth();
-        
-        const monthName = currentMonthDate.toLocaleString("default", { month: "long" });
-        const days = getDaysInMonth(year, month);
-        const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-        return (
-          <div className="space-y-4 animate-fade-in">
-            {/* Month Selector */}
-            <div className="flex items-center justify-between pb-2 border-b border-border/40">
-              <button
-                type="button"
-                onClick={() => setSelectedMonthOffset(prev => prev - 1)}
-                className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:text-foreground transition-all"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <span className="text-xs font-bold uppercase tracking-wider">{monthName} {year}</span>
-              <button
-                type="button"
-                onClick={() => setSelectedMonthOffset(prev => prev + 1)}
-                className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:text-foreground transition-all"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-
-            {/* Grid */}
-            <div className="grid grid-cols-7 gap-1.5">
-              {dayNames.map((name) => (
-                <div key={name} className="text-center font-bold text-[9px] uppercase text-muted-foreground py-1">
-                  {name}
-                </div>
-              ))}
-
-              {days.map((day, idx) => {
-                const dayOfWeek = day.date.getDay();
-                const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-                const schedule = isWeekend ? null : classSchedule[dayOfWeek - 1];
-                const isToday = day.date.toDateString() === new Date().toDateString();
-
-                return (
-                  <div
-                    key={idx}
-                    className={`aspect-square p-1 rounded-lg border flex flex-col justify-between transition-all ${
-                      day.isCurrentMonth
-                        ? "bg-card border-border/40"
-                        : "bg-muted/10 border-transparent text-muted-foreground/30"
-                    } ${isToday ? "ring-2 ring-primary border-transparent bg-primary/5" : ""}`}
-                  >
-                    <div className="flex justify-between items-center">
-                      <span className={`text-[9px] font-bold ${isToday ? "text-primary" : ""}`}>
-                        {day.date.getDate()}
-                      </span>
-                    </div>
-
-                    {!isWeekend && day.isCurrentMonth && schedule && schedule.slots && (
-                      <div className="flex justify-center gap-0.5 mt-auto">
-                        {schedule.slots.map((slot, sIdx) => (
-                          <span
-                            key={sIdx}
-                            className={`h-1 w-1 rounded-full bg-gradient-to-r ${resolveSlotColor(slot.color).split(" ").slice(0, 2).join(" ")}`}
-                            title={slot.subject}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="text-center text-[10px] text-muted-foreground flex items-center justify-center gap-1">
-              <Info className="h-3 w-3 text-primary" /> Classes run Monday through Friday.
-            </div>
-          </div>
-        );
-      }
-    }
-  };
-
-  // Dynamic subjects list with unique colors and teachers
-  const getSubjectLegends = () => {
-    const legendsMap = new Map<string, { subject: string; color: string; teacher: string }>();
-    classSchedule.forEach(day => {
-      day.slots.forEach(slot => {
-        if (!legendsMap.has(slot.subject)) {
-          legendsMap.set(slot.subject, {
-            subject: slot.subject,
-            color: slot.color,
-            teacher: slot.teacher
-          });
-        }
-      });
-    });
-    return Array.from(legendsMap.values());
-  };
+  
 
   const classData = enrollment?.classes;
   const schoolData = classData?.schools;
@@ -941,6 +461,29 @@ export default function StudentClassPage() {
         );
       })()}
 
+      {/* Academic Subjects CTA */}
+      <div className="card rounded-[24px] p-5 border border-border/50 bg-card shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+            <BookOpen className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="font-bold text-sm text-foreground">
+              Academic Subjects Catalog & Electives
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Select your elective subjects, view required courses, and track active academic listings.
+            </p>
+          </div>
+        </div>
+        <Link
+          href="/student/class/subjects"
+          className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold text-primary-foreground bg-primary transition-all active:scale-[0.98] shadow-md shadow-primary/10 hover:opacity-95 shrink-0"
+        >
+          Manage Subjects & Electives &rarr;
+        </Link>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Columns (Schedules & Teacher) */}
         <div className="lg:col-span-2 space-y-6">
@@ -969,69 +512,7 @@ export default function StudentClassPage() {
 
           {/* Timetable / Schedule */}
           <div className="card rounded-2xl p-6 space-y-5">
-            <div className="flex flex-wrap items-center justify-between gap-4 pb-3 border-b border-border">
-              <div className="flex items-center gap-2.5">
-                <div className="h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center">
-                  <Calendar className="h-4.5 w-4.5 text-primary" />
-                </div>
-                <div>
-                  <h2 className="font-bold text-sm">Class Schedule & Subjects</h2>
-                  <p className="text-xs text-muted-foreground">Interactive syllabus, hours, and calendar views</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                {/* Scope Selector: Daily, Weekly, Monthly */}
-                <div className="flex rounded-xl bg-muted p-1">
-                  {(["daily", "weekly", "monthly"] as const).map((scope) => (
-                    <button
-                      key={scope}
-                      type="button"
-                      onClick={() => setTimeScope(scope)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition-all ${
-                        timeScope === scope
-                          ? "bg-background text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {scope}
-                    </button>
-                  ))}
-                </div>
-
-                {/* View Selector: List vs Calendar */}
-                <div className="flex rounded-xl bg-muted p-1">
-                  <button
-                    type="button"
-                    onClick={() => setViewMode("list")}
-                    className={`p-1.5 rounded-lg transition-all ${
-                      viewMode === "list"
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                    title="List View"
-                  >
-                    <ListIcon className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setViewMode("calendar")}
-                    className={`p-1.5 rounded-lg transition-all ${
-                      viewMode === "calendar"
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                    title="Calendar View"
-                  >
-                    <CalendarDays className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-2">
-              {renderScheduleContent()}
-            </div>
+            <ScheduleComponent schoolId={schoolData.id} classId={classData.id} onSubjectsChange={setSubjectLegends} />
           </div>
         </div>
 
@@ -1081,7 +562,7 @@ export default function StudentClassPage() {
               <span className="h-2.5 w-2.5 rounded-full bg-primary" /> Subjects
             </h2>
             <div className="grid grid-cols-1 gap-2.5">
-              {getSubjectLegends().map((legend, idx) => {
+              {subjectLegends.map((legend, idx) => {
                 const colorParts = resolveSlotColor(legend.color).split(" ");
                 const bgGradient = `bg-gradient-to-br ${colorParts.slice(0, 2).join(" ")}`;
                 return (

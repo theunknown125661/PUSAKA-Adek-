@@ -11,11 +11,13 @@ import { useTranslation } from "@/lib/i18n/use-translation";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { toLocalYYYYMMDD } from "@/lib/utils/format";
+import { calculateLevelAndProgress } from "@/lib/utils/gamification";
 import { 
   X, Sun, Moon, Globe, User, Settings, LogOut, 
-  GraduationCap, Coins, Flame, ChevronDown,
-  Medal, Trophy, Shield, CheckCircle2, Lock, Sparkles, Star
+  GraduationCap, Coins, Flame, ChevronDown
 } from "lucide-react";
+import { Medal, Trophy, Shield, CheckCircle2, Lock, Sparkles, Star } from "lucide-react";
+import { XPProgressBar } from "@/components/shared/xp-progress-bar";
 
 const IconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   Flame,
@@ -42,12 +44,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     coinsBalance: number | null;
     unlockedBadges: any[];
     weeklyLogs: any[];
+    weekHolidays: any[];
   }>({
     rupiahBalance: null,
     coinsBalance: null,
     unlockedBadges: [],
-    weeklyLogs: []
+    weeklyLogs: [],
+    weekHolidays: []
   });
+  const [economyConfig, setEconomyConfig] = useState<any>(null);
   const { theme, setTheme } = useTheme();
   const { t, locale } = useTranslation();
   const router = useRouter();
@@ -90,11 +95,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             .eq("student_id", profileId)
             .gte("attendance_date", toLocalYYYYMMDD(monday));
 
+          // Fetch weekly holidays
+          let holidays: any[] = [];
+          if (profile?.school_id) {
+            const sunday = new Date(today.getFullYear(), today.getMonth(), diff + 6);
+            const { data: holidayData } = await supabase
+              .from("holiday_calendar")
+              .select("date, name, color_hex")
+              .eq("school_id", profile.school_id)
+              .gte("date", toLocalYYYYMMDD(monday))
+              .lte("date", toLocalYYYYMMDD(sunday));
+            
+            if (holidayData) holidays = holidayData;
+            
+            const { data: rules } = await supabase
+              .from("reward_rules")
+              .select("economy_config")
+              .eq("school_id", profile.school_id)
+              .maybeSingle();
+            if (rules && rules.economy_config) {
+              setEconomyConfig(rules.economy_config);
+            }
+          }
+
           setStudentMetrics({
             rupiahBalance: rupiahWallet?.balance_available ?? 0,
             coinsBalance: coinWallet?.balance_available ?? profile?.coins ?? 0,
             unlockedBadges: badges || [],
-            weeklyLogs: logs || []
+            weeklyLogs: logs || [],
+            weekHolidays: holidays
           });
         } catch (error) {
           console.error("Error loading student metrics:", error);
@@ -127,9 +156,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           .eq("status", "flagged");
 
         const { count: payoutCount } = await supabase
-          .from("payout_requests")
+          .from("withdrawal_requests")
           .select("*", { count: "exact", head: true })
-          .eq("status", "REQUESTED");
+          .eq("status", "pending");
 
         setMetrics({
           totalStudents: studentCount || 0,
@@ -270,7 +299,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const streakStyles = getStreakStyles(profile.streak_current || 0);
+  const todayStrForStreak = new Date().toLocaleDateString('en-CA'); // local yyyy-mm-dd
+  const todayLog = studentMetrics.weeklyLogs.find(l => l.attendance_date === todayStrForStreak);
+  const todayHoliday = studentMetrics.weekHolidays.find(h => h.date && h.date.startsWith(todayStrForStreak));
+  const activeDaysForStreak = economyConfig?.active_days || [1, 2, 3, 4, 5];
+  const isWeekendToday = !activeDaysForStreak.includes(new Date().getDay());
+  
+  let hasWindowPassed = false;
+  if (economyConfig?.attendance_end_time) {
+    const nowTime = new Date();
+    const timeStr = `${String(nowTime.getHours()).padStart(2, "0")}:${String(nowTime.getMinutes()).padStart(2, "0")}`;
+    if (timeStr > economyConfig.attendance_end_time) {
+      hasWindowPassed = true;
+    }
+  }
+
+  const isStreakBrokenToday = !todayLog && hasWindowPassed && !todayHoliday && !isWeekendToday;
+  const displayStreak = isStreakBrokenToday ? 0 : (profile.streak_current || 0);
+
+  const streakStyles = getStreakStyles(displayStreak);
 
   return (
     <div className="min-h-screen bg-background">
@@ -299,29 +346,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <span className="font-bold text-xs text-foreground leading-none">{profile.full_name}</span>
                 <span className="text-[8.5px] text-muted-foreground/80 capitalize mt-0.5 font-medium tracking-wide leading-none">{role}</span>
                 
-                {role === "student" && (
-                  <div className="flex items-center gap-1 text-[8px] font-semibold text-muted-foreground/75 mt-1 leading-none whitespace-nowrap">
-                    <div className={`flex items-center gap-0.5 ${streakStyles.textColor}`} title="Current Streak">
-                      <Flame className={`h-2 w-2 shrink-0 ${streakStyles.fillColor} transition-all duration-300`} />
-                      <span>{profile.streak_current || 0}d</span>
+                {role === "student" && (() => {
+                  const { level: dynamicHeaderLevel } = calculateLevelAndProgress(profile?.xp || 0, economyConfig, profile?.level);
+                  return (
+                    <div className="flex items-center gap-1 text-[8px] font-semibold text-muted-foreground/75 mt-1 leading-none whitespace-nowrap">
+                      <div className={`flex items-center gap-0.5 ${streakStyles.textColor}`} title="Current Streak">
+                        <Flame className={`h-2 w-2 shrink-0 ${streakStyles.fillColor} transition-all duration-300`} />
+                        <span>{displayStreak}d</span>
+                      </div>
+                      <span className="text-[6px] opacity-30 select-none">•</span>
+                      <div className="flex items-center gap-0.5 text-primary" title="Level">
+                        <GraduationCap className="h-2 w-2 shrink-0" />
+                        <span>Lvl {dynamicHeaderLevel}</span>
+                      </div>
+                      <span className="text-[6px] opacity-30 select-none">•</span>
+                      <div className="flex items-center gap-0.5 text-amber-500" title="Coins">
+                        <Coins className="h-2 w-2 shrink-0 fill-amber-500/10" />
+                        <span>{studentMetrics.coinsBalance !== null ? studentMetrics.coinsBalance : (profile.coins || 0)}</span>
+                      </div>
+                      <span className="text-[6px] opacity-30 select-none">•</span>
+                      <div className="flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400" title="Money Balance">
+                        <span className="text-[7.5px] font-black mr-0.5">Rp</span>
+                        <span>{(studentMetrics.rupiahBalance !== null ? studentMetrics.rupiahBalance : (profile.rupiah || 0)).toLocaleString()}</span>
+                      </div>
                     </div>
-                    <span className="text-[6px] opacity-30 select-none">•</span>
-                    <div className="flex items-center gap-0.5 text-primary" title="Level">
-                      <GraduationCap className="h-2 w-2 shrink-0" />
-                      <span>Lvl {profile.level || 1}</span>
-                    </div>
-                    <span className="text-[6px] opacity-30 select-none">•</span>
-                    <div className="flex items-center gap-0.5 text-amber-500" title="Coins">
-                      <Coins className="h-2 w-2 shrink-0 fill-amber-500/10" />
-                      <span>{studentMetrics.coinsBalance !== null ? studentMetrics.coinsBalance : (profile.coins || 0)}</span>
-                    </div>
-                    <span className="text-[6px] opacity-30 select-none">•</span>
-                    <div className="flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400" title="Money Balance">
-                      <span className="text-[7.5px] font-black mr-0.5">Rp</span>
-                      <span>{(studentMetrics.rupiahBalance !== null ? studentMetrics.rupiahBalance : (profile.rupiah || 0)).toLocaleString()}</span>
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
 
 
@@ -362,44 +412,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <div className="space-y-4">
                     {/* Interactive Level Ring & Streak block */}
                     <div className="flex items-center gap-4 bg-muted/30 p-3.5 rounded-2xl border border-border/40">
-                      {/* Interactive Level Ring */}
-                      <div className="relative group flex items-center justify-center h-16 w-16 cursor-default shrink-0 bg-card hover:bg-muted rounded-xl border border-border/40 hover:border-border/80 shadow-sm hover:shadow-md transition-all duration-300">
-                        <svg className="w-16 h-16 transform -rotate-90">
-                          <circle
-                            cx="32"
-                            cy="32"
-                            r="26"
-                            className="stroke-muted/40"
-                            strokeWidth="3.5"
-                            fill="transparent"
-                          />
-                          <circle
-                            cx="32"
-                            cy="32"
-                            r="26"
-                            className="stroke-primary transition-all duration-700 ease-out"
-                            strokeWidth="3.5"
-                            fill="transparent"
-                            strokeDasharray={2 * Math.PI * 26}
-                            strokeDashoffset={2 * Math.PI * 26 * (1 - Math.min((profile.xp || 0) / ((profile.level || 1) * 100), 1))}
-                            strokeLinecap="round"
-                          />
-                        </svg>
-                        <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
-                          <span className="text-[8px] font-extrabold uppercase text-muted-foreground tracking-wider">LVL</span>
-                          <span className="text-sm font-black text-foreground mt-0.5">{profile.level || 1}</span>
-                        </div>
-                        {/* Tooltip on hover */}
-                        <div className="absolute bottom-full mb-2 flex flex-col items-center z-[60] pointer-events-none opacity-0 group-hover:opacity-100 translate-y-1 group-hover:translate-y-0 transition-all duration-200 ease-out">
-                          <div className="bg-background text-foreground border border-border px-3 py-1.5 rounded-xl shadow-xl shadow-black/10 dark:shadow-black/40 text-left text-[11px] min-w-[120px]">
-                            <p className="font-extrabold text-[9px] uppercase text-primary mb-1">XP Progress</p>
-                            <div className="flex justify-between font-bold leading-none">
-                              <span>{profile.xp || 0}</span>
-                              <span className="text-muted-foreground">/ {(profile.level || 1) * 100} XP</span>
-                            </div>
-                          </div>
-                          <div className="w-2 h-2 bg-background border-r border-b border-border rotate-45 -mt-1" />
-                        </div>
+                      <div className="w-1/2 flex items-center bg-card rounded-xl border border-border/40 p-2 shadow-sm">
+                        <XPProgressBar 
+                          xp={profile?.xp || 0} 
+                          economyConfig={economyConfig} 
+                          userLevel={profile?.level} 
+                        />
                       </div>
 
                       {/* Interactive Streak Flame */}
@@ -411,7 +429,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                           <div>
                             <p className={`text-[9px] font-bold ${streakStyles.textColor} uppercase tracking-wider leading-none`}>Streak</p>
                             <h4 className="text-sm font-black text-foreground mt-1 leading-none">
-                              {profile.streak_current || 0} <span className="text-[10px] font-extrabold text-muted-foreground">Days</span>
+                              {displayStreak} <span className="text-[10px] font-extrabold text-muted-foreground">{displayStreak < 2 ? "Day" : "Days"}</span>
                             </h4>
                           </div>
                         </div>
@@ -450,17 +468,53 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                             const isApproved = log?.status === "approved";
                             const isPending = log?.status === "pending_teacher_view" || log?.status === "pending_admin_review";
                             const isRejected = log?.status === "rejected";
+                            const holiday = studentMetrics.weekHolidays.find(h => h.date && h.date.startsWith(dateStr));
+                            
+                            const d = new Date(dateStr);
+                            const activeDays = economyConfig?.active_days || [1, 2, 3, 4, 5];
+                            const isWeekend = !activeDays.includes(d.getDay());
+
+                            let hasDatePassed = false;
+                            if (isFuture) {
+                                hasDatePassed = false;
+                            } else if (isToday) {
+                                const endTime = economyConfig?.attendance_end_time;
+                                if (endTime) {
+                                    const nowTime = new Date();
+                                    const timeStr = `${String(nowTime.getHours()).padStart(2, "0")}:${String(nowTime.getMinutes()).padStart(2, "0")}`;
+                                    if (timeStr > endTime) hasDatePassed = true;
+                                }
+                            } else {
+                                hasDatePassed = true;
+                            }
+                            const isAbsent = !log && !holiday && !isWeekend && hasDatePassed;
 
                             let circleStyle = "bg-muted/40 border-border text-muted-foreground/60";
                             let icon = <span className="text-[9px] font-bold">{dayNames[idx]}</span>;
+                            let inlineStyle = {};
 
                             if (isApproved) {
                               circleStyle = "bg-gradient-to-br from-orange-400 to-amber-500 border-orange-500 text-white shadow-sm shadow-orange-500/10";
                               icon = <Flame className="h-3 w-3 fill-white/20 animate-pulse" />;
                             } else if (isPending) {
                               circleStyle = "bg-amber-500/10 border-amber-500/30 text-amber-600";
-                            } else if (isRejected) {
+                            } else if (isRejected || isAbsent) {
                               circleStyle = "bg-rose-500/10 border-rose-500/30 text-rose-500";
+                            } else if (holiday) {
+                              const color = holiday?.color_hex || "#3b82f6";
+                              circleStyle = "border shadow-sm text-foreground";
+                              inlineStyle = {
+                                backgroundColor: `${color}20`,
+                                borderColor: `${color}50`,
+                                color: color
+                              };
+                            } else if (isWeekend) {
+                              circleStyle = "border shadow-sm text-foreground";
+                              inlineStyle = {
+                                backgroundColor: "#64748b20", // slate-500
+                                borderColor: "#64748b50",
+                                color: "#64748b"
+                              };
                             } else if (isToday) {
                               circleStyle = "border-primary bg-primary/5 text-primary border-2 animate-pulse";
                             } else if (isFuture) {
@@ -471,7 +525,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                               <div key={idx} className="flex flex-col items-center gap-1 flex-1">
                                 <div 
                                   className={`w-7 h-7 rounded-full border flex items-center justify-center transition-all ${circleStyle}`}
-                                  title={log ? `Attendance: ${log.status}` : isToday ? "Today" : isFuture ? "Future" : "No record"}
+                                  style={inlineStyle}
+                                  title={log ? `Attendance: ${log.status}` : holiday ? `Holiday: ${holiday.name}` : isToday ? "Today" : isFuture ? "Future" : "No record"}
                                 >
                                   {icon}
                                 </div>

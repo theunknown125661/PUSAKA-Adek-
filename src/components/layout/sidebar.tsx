@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import type { UserRole, Profile } from "@/lib/types/database";
 import type { Messages } from "@/lib/i18n/types";
+import { XPProgressBar } from "@/components/shared/xp-progress-bar";
 import AvatarDisplay from "@/components/profile/avatar-display";
 import { useTheme } from "next-themes";
 import { useTranslation } from "@/lib/i18n/use-translation";
@@ -13,14 +14,15 @@ import {
   LayoutDashboard, MapPin, History, Wallet, Users, User, Coins, Flame,
   ClipboardCheck, Settings, BookOpen, LogOut, GraduationCap,
   AlertTriangle, Gift, Library, BarChart3, Sun, Moon, Globe, Calendar as CalendarIcon, Store, Medal, ClipboardList,
-  Menu, X, Bell
+  Menu, X, Bell, School, QrCode
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { calculateLevelAndProgress } from "@/lib/utils/gamification";
 import { useRouter } from "next/navigation";
 import { NotificationBell } from "@/components/shared/notification-bell";
 import { useNotifications } from "@/lib/hooks/use-notifications";
 
-type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string }> };
+type NavItem = { href: string; label: string; icon: React.ComponentType<{ className?: string }>; exact?: boolean };
 type NavSection = { title?: string; items: NavItem[] };
 
 const getNavConfig = (t: Messages): Record<UserRole, NavSection[]> => ({
@@ -28,7 +30,6 @@ const getNavConfig = (t: Messages): Record<UserRole, NavSection[]> => ({
     {
       items: [
         { href: "/student", label: t.navigation.dashboard, icon: LayoutDashboard },
-        { href: "/student/check-in", label: t.navigation.checkIn, icon: MapPin },
         { href: "/student/class", label: t.navigation.myClass, icon: BookOpen },
         { href: "/student/shop", label: t.navigation.rewardShop, icon: Store },
         { href: "/student/badges", label: t.navigation.badges, icon: Medal },
@@ -60,7 +61,7 @@ const getNavConfig = (t: Messages): Record<UserRole, NavSection[]> => ({
     {
       title: t.navigation.sections.verification,
       items: [
-        { href: "/admin/attendance", label: t.navigation.reviews, icon: ClipboardCheck },
+        { href: "/admin/attendance", label: t.navigation.reviews, icon: ClipboardCheck, exact: true },
         { href: "/admin/flagged", label: t.navigation.flagged, icon: AlertTriangle },
         { href: "/admin/attendance/calendar", label: t.navigation.calendar, icon: CalendarIcon },
       ]
@@ -75,8 +76,11 @@ const getNavConfig = (t: Messages): Record<UserRole, NavSection[]> => ({
     {
       title: t.navigation.sections.management,
       items: [
+        { href: "/admin/schools", label: "Schools Directory", icon: School },
+        { href: "/admin/subjects", label: "Global Subjects", icon: BookOpen },
+        { href: "/admin/timetable", label: "Timetable Builder", icon: CalendarIcon },
         { href: "/admin/users", label: t.navigation.users, icon: Users },
-        { href: "/admin/classes", label: t.navigation.classes, icon: Library },
+
         { href: "/admin/holidays", label: t.navigation.holidays, icon: CalendarIcon },
         { href: "/admin/shop", label: t.navigation.shopItems, icon: Store },
         { href: "/admin/badges", label: t.navigation.badges, icon: Medal },
@@ -104,7 +108,6 @@ export function Sidebar({ role, profile }: { role: UserRole; profile: Profile })
 
   const studentBottomItems = [
     { href: "/student", label: t.navigation.dashboard, icon: LayoutDashboard },
-    { href: "/student/history", label: t.navigation.history, icon: History },
     { href: "/student/wallet", label: t.navigation.wallet, icon: Wallet },
     { href: "/student/shop", label: t.navigation.rewardShop, icon: Store },
     { href: "/student/settings", label: t.navigation.profile, icon: User },
@@ -117,6 +120,23 @@ export function Sidebar({ role, profile }: { role: UserRole; profile: Profile })
     pendingReviews?: number;
     pendingWithdrawals?: number;
   }>({});
+  const [economyConfig, setEconomyConfig] = useState<any>(null);
+
+  useEffect(() => {
+    if (role !== "student" || !profile?.school_id) return;
+    const supabase = createClient();
+    async function loadConfig() {
+      const { data } = await supabase
+        .from("reward_rules")
+        .select("economy_config")
+        .eq("school_id", profile.school_id)
+        .maybeSingle();
+      if (data && data.economy_config) {
+        setEconomyConfig(data.economy_config);
+      }
+    }
+    loadConfig();
+  }, [role, profile?.school_id]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -151,9 +171,9 @@ export function Sidebar({ role, profile }: { role: UserRole; profile: Profile })
           .eq("status", "flagged");
 
         const { count: payoutCount } = await supabase
-          .from("payout_requests")
+          .from("withdrawal_requests")
           .select("*", { count: "exact", head: true })
-          .eq("status", "REQUESTED");
+          .eq("status", "pending");
 
         setMetrics({
           totalStudents: studentCount || 0,
@@ -199,7 +219,7 @@ export function Sidebar({ role, profile }: { role: UserRole; profile: Profile })
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className="hidden lg:flex flex-col w-64 border-r border-border bg-card min-h-screen fixed left-0 top-0 z-30">
+      <aside className="hidden lg:flex flex-col w-64 border-r border-border bg-card h-screen fixed left-0 top-0 z-30">
         <div className="h-16 px-5 flex items-center border-b border-border shrink-0">
           <Link href={`/${role}`} className="flex items-center gap-2.5 w-full">
             <div className="h-9 w-9 rounded-lg bg-primary flex items-center justify-center">
@@ -220,7 +240,9 @@ export function Sidebar({ role, profile }: { role: UserRole; profile: Profile })
                 </h4>
               )}
               {section.items.map((item) => {
-                const isActive = pathname === item.href || (item.href !== `/${role}` && pathname.startsWith(item.href));
+                const isActive = item.exact 
+                  ? pathname === item.href 
+                  : pathname === item.href || (item.href !== `/${role}` && pathname.startsWith(`${item.href}/`));
                 const isNotifications = item.href.endsWith("/notifications");
                 return (
                   <Link
@@ -346,7 +368,9 @@ export function Sidebar({ role, profile }: { role: UserRole; profile: Profile })
                     </h4>
                   )}
                   {section.items.map((item) => {
-                    const isActive = pathname === item.href || (item.href !== `/${role}` && pathname.startsWith(item.href));
+                    const isActive = item.exact 
+                      ? pathname === item.href 
+                      : pathname === item.href || (item.href !== `/${role}` && pathname.startsWith(`${item.href}/`));
                     const isNotifications = item.href.endsWith("/notifications");
                     return (
                       <Link
@@ -483,34 +507,29 @@ export function Sidebar({ role, profile }: { role: UserRole; profile: Profile })
             {/* Role-based Stats */}
             {role === "student" ? (
               <div className="space-y-2 bg-muted/40 p-3.5 rounded-2xl border border-border/50">
-                <div className="flex justify-between text-xs font-bold">
-                  <span className="text-primary flex items-center gap-1"><GraduationCap className="h-4 w-4" /> Level {profile.level || 1}</span>
-                  <span className="text-muted-foreground">{profile.xp || 0} XP</span>
-                </div>
-                <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-primary transition-all duration-500" 
-                    style={{ width: `${Math.min(100, ((profile.xp || 0) / ((profile.level || 1) * 100)) * 100)}%` }}
-                  />
-                </div>
+                <XPProgressBar 
+                  xp={profile?.xp || 0} 
+                  economyConfig={economyConfig} 
+                  userLevel={profile?.level} 
+                />
                 {/* Stats row */}
-                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border/30 mt-2">
-                  <div className="flex items-center justify-between px-3 py-2 bg-card rounded-xl border border-border/40">
-                    <span className="text-[10px] font-bold text-muted-foreground uppercase">Coins</span>
-                    <span className="text-sm font-black text-amber-500 flex items-center gap-0.5">
-                      <Coins className="h-3.5 w-3.5" />
-                      {profile.coins || 0}
-                    </span>
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border/30 mt-2">
+                      <div className="flex items-center justify-between px-3 py-2 bg-card rounded-xl border border-border/40">
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase">Coins</span>
+                        <span className="text-sm font-black text-amber-500 flex items-center gap-0.5">
+                          <Coins className="h-3.5 w-3.5" />
+                          {profile.coins || 0}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between px-3 py-2 bg-card rounded-xl border border-border/40">
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase">Streak</span>
+                        <span className={`text-sm font-black ${streakStyles.iconColor} flex items-center gap-0.5`}>
+                          <Flame className={`h-3.5 w-3.5 ${streakStyles.fillColor} ${streakStyles.scale} ${streakStyles.pulse} transition-all duration-300`} />
+                          {profile.streak_current || 0}d
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between px-3 py-2 bg-card rounded-xl border border-border/40">
-                    <span className="text-[10px] font-bold text-muted-foreground uppercase">Streak</span>
-                    <span className={`text-sm font-black ${streakStyles.iconColor} flex items-center gap-0.5`}>
-                      <Flame className={`h-3.5 w-3.5 ${streakStyles.fillColor} ${streakStyles.scale} ${streakStyles.pulse} transition-all duration-300`} />
-                      {profile.streak_current || 0}d
-                    </span>
-                  </div>
-                </div>
-              </div>
             ) : role === "teacher" ? (
               <div className="grid grid-cols-2 gap-3 bg-muted/30 p-3 rounded-2xl border border-border/40">
                 <div className="bg-card border border-border/50 p-3 rounded-xl text-center">

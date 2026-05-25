@@ -7,6 +7,7 @@ import { formatCurrency, formatDate, formatTime } from "@/lib/utils/format";
 import { Gift, Loader2, Save, History, TrendingUp, Wallet } from "lucide-react";
 import { EmptyState } from "@/components/shared/empty-state";
 import type { WalletTransaction } from "@/lib/types/database";
+import { Clock, Settings as SettingsIcon } from "lucide-react";
 
 type AuditTransaction = {
   id: string;
@@ -18,21 +19,10 @@ type AuditTransaction = {
   profiles?: { full_name: string } | null;
 };
 
-interface RulesConfig {
-  id: string;
-  base_reward: number;
-  early_bonus: number;
-  monthly_hold_bonus_pct: number;
-  attendance_start_time: string;
-  attendance_end_time: string;
-  early_cutoff_time: string;
-  min_withdrawal_amount: number;
-  economy_config?: any;
-}
+
 
 export default function RewardsAdminPage() {
   const { t, interpolate, isClient } = useTranslation();
-  const [rules, setRules] = useState<RulesConfig | null>(null);
   const [transactions, setTransactions] = useState<AuditTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -41,101 +31,30 @@ export default function RewardsAdminPage() {
   useEffect(() => {
     const supabase = createClient();
     async function load() {
-      const [rRes, tRes] = await Promise.all([
-        supabase.from("reward_rules").select("*").limit(1).maybeSingle(),
-        supabase.from("wallet_transactions")
-          .select("*, profiles(full_name)")
-          .order("created_at", { ascending: false })
-          .limit(50),
-      ]);
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: profile } = await supabase.from("profiles").select("school_id, id, role").eq("id", user?.id).single();
       
-      if (rRes.data) {
-        setRules(rRes.data as RulesConfig);
-      } else {
-        // Fallback default rules
-        setRules({
-          id: "",
-          base_reward: 5000,
-          early_bonus: 2000,
-          monthly_hold_bonus_pct: 5,
-          attendance_start_time: "06:00",
-          attendance_end_time: "09:00",
-          early_cutoff_time: "07:00",
-          min_withdrawal_amount: 10000,
-          economy_config: {}
-        });
+      let schoolId = profile?.school_id;
+      if (!schoolId && profile?.role === "admin") {
+        const { data: assignments } = await supabase.from("school_admin_assignments").select("school_id").eq("user_id", profile?.id).limit(1);
+        if (assignments && assignments.length > 0) schoolId = assignments[0].school_id;
       }
-      if (tRes.data) setTransactions(tRes.data as any[]);
+      
+      if (!schoolId) {
+        const { data: firstSchool } = await supabase.from("schools").select("id").limit(1).single();
+        if (firstSchool) schoolId = firstSchool.id;
+      }
+
+      if (schoolId) {
+        const { data: tData } = await supabase.from("wallet_transactions").select("*, profiles(full_name)").order("created_at", { ascending: false }).limit(50);
+        if (tData) setTransactions(tData as any[]);
+      }
       setLoading(false);
     }
     load();
   }, []);
 
-  const handleSave = async () => {
-    if (!rules) return;
-    setSaving(true);
-    setMsg("");
-    const supabase = createClient();
-    
-    let error;
-    if (!rules.id) {
-      const { data: { user } } = await supabase.auth.getUser();
-      const { data: profile } = await supabase.from("profiles").select("school_id").eq("id", user?.id).single();
-      let schoolId = profile?.school_id;
-      if (!schoolId) {
-        const { data: firstSchool } = await supabase.from("schools").select("id").limit(1).single();
-        if (firstSchool) schoolId = firstSchool.id;
-      }
-      
-      if (!schoolId) {
-        setMsg("Error: No schools exist in the database. Please create a school first.");
-        setSaving(false);
-        return;
-      }
-      
-      const { data, error: insertError } = await supabase
-        .from("reward_rules")
-        .insert({ 
-          school_id: schoolId,
-          base_reward: rules.base_reward, 
-          early_bonus: rules.early_bonus, 
-          monthly_hold_bonus_pct: rules.monthly_hold_bonus_pct, 
-          attendance_start_time: rules.attendance_start_time, 
-          attendance_end_time: rules.attendance_end_time, 
-          early_cutoff_time: rules.early_cutoff_time, 
-          min_withdrawal_amount: rules.min_withdrawal_amount,
-          economy_config: rules.economy_config
-        })
-        .select()
-        .single();
-      
-      error = insertError;
-      if (data) {
-        setRules(data as RulesConfig);
-      }
-    } else {
-      const { error: updateError } = await supabase
-        .from("reward_rules")
-        .update({ 
-          base_reward: rules.base_reward, 
-          early_bonus: rules.early_bonus, 
-          monthly_hold_bonus_pct: rules.monthly_hold_bonus_pct, 
-          attendance_start_time: rules.attendance_start_time, 
-          attendance_end_time: rules.attendance_end_time, 
-          early_cutoff_time: rules.early_cutoff_time, 
-          min_withdrawal_amount: rules.min_withdrawal_amount,
-          economy_config: rules.economy_config
-        })
-        .eq("id", rules.id);
-      error = updateError;
-    }
-      
-    if (error) setMsg(t.adminRewards.errorSaving);
-    else setMsg(t.adminRewards.successSaving);
-    
-    setSaving(false);
-    setTimeout(() => setMsg(""), 3000);
-  };
+  
 
   const processMonthlyHold = async () => {
     const confirm = window.confirm(t.adminRewards.monthlyConfirm);
@@ -181,88 +100,7 @@ export default function RewardsAdminPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Rules Editor */}
-        <div className="space-y-4">
-          {rules && (
-            <div className="glass rounded-2xl p-5 space-y-4 border border-primary/20">
-              <h2 className="font-semibold text-primary flex items-center gap-2"><Wallet className="h-4 w-4" /> {t.adminRewards.financialRules}</h2>
-              
-              <div className="space-y-4">
-                {/* Coins Config */}
-                <div className="space-y-2">
-                  <h3 className="font-medium text-xs text-amber-600 uppercase tracking-wider">{t.adminRewards.coinsTitle}</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    {field(t.adminRewards.attendancePresent, rules.economy_config?.coins?.attendance_present || 20, (v) => setRules({ 
-                      ...rules, 
-                      economy_config: { 
-                        ...rules.economy_config, 
-                        coins: { ...rules.economy_config?.coins, attendance_present: parseInt(v) || 0 } 
-                      } 
-                    }), "number")}
-                    {field(t.adminRewards.onTimeBonus, rules.economy_config?.coins?.attendance_ontime || 10, (v) => setRules({ 
-                      ...rules, 
-                      economy_config: { 
-                        ...rules.economy_config, 
-                        coins: { ...rules.economy_config?.coins, attendance_ontime: parseInt(v) || 0 } 
-                      } 
-                    }), "number")}
-                  </div>
-                </div>
-
-                {/* Rupiah Config */}
-                <div className="space-y-2">
-                  <h3 className="font-medium text-xs text-emerald-600 uppercase tracking-wider">{t.adminRewards.rupiahTitle}</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    {field(t.adminRewards.attendancePresentRp, rules.economy_config?.rupiah?.attendance_present || 1000, (v) => setRules({ 
-                      ...rules, 
-                      economy_config: { 
-                        ...rules.economy_config, 
-                        rupiah: { ...rules.economy_config?.rupiah, attendance_present: parseInt(v) || 0 } 
-                      } 
-                    }), "number")}
-                    {field(t.adminRewards.onTimeBonusRp, rules.economy_config?.rupiah?.attendance_ontime || 500, (v) => setRules({ 
-                      ...rules, 
-                      economy_config: { 
-                        ...rules.economy_config, 
-                        rupiah: { ...rules.economy_config?.rupiah, attendance_ontime: parseInt(v) || 0 } 
-                      } 
-                    }), "number")}
-                  </div>
-                </div>
-
-                {/* System Values */}
-                <div className="grid grid-cols-2 gap-4 pt-2 border-t">
-                  {field(t.adminRewards.minWithdrawal, rules.min_withdrawal_amount, (v) => setRules({ ...rules, min_withdrawal_amount: parseInt(v) || 0 }), "number")}
-                  {field(t.adminRewards.monthlyHoldPct, rules.monthly_hold_bonus_pct, (v) => setRules({ ...rules, monthly_hold_bonus_pct: parseFloat(v) || 0 }), "number")}
-                </div>
-              </div>
-              
-              <h2 className="font-semibold pt-2 text-primary flex items-center gap-2"><History className="h-4 w-4" /> {t.adminRewards.timeWindows}</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {field(t.adminRewards.startTime, rules.attendance_start_time, (v) => setRules({ ...rules, attendance_start_time: v }), "time")}
-                {field(t.adminRewards.endTime, rules.attendance_end_time, (v) => setRules({ ...rules, attendance_end_time: v }), "time")}
-                {field(t.adminRewards.earlyCutoff, rules.early_cutoff_time, (v) => setRules({ ...rules, early_cutoff_time: v }), "time")}
-              </div>
-
-              <div className="pt-4 flex items-center justify-between border-t border-border">
-                <span className={`text-xs font-medium ${msg.includes("Gagal") || msg.includes("Error") ? "text-destructive" : "text-emerald-500"}`}>{msg}</span>
-                <button onClick={handleSave} disabled={saving} className="px-5 py-2 rounded-xl bg-primary text-primary-foreground font-semibold text-xs disabled:opacity-50 flex items-center gap-2 hover:bg-primary/90 transition-colors">
-                  {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} {saving ? t.adminRewards.savingStatus : t.adminRewards.saveConfig}
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="glass rounded-2xl p-5 border border-indigo-500/20">
-            <h2 className="font-semibold text-indigo-500 flex items-center gap-2 mb-2"><TrendingUp className="h-4 w-4" /> {t.adminRewards.monthlyProcessing}</h2>
-            <p className="text-xs text-muted-foreground mb-4">{t.adminRewards.monthlyProcessingDesc}</p>
-            <button onClick={processMonthlyHold} disabled={saving} className="w-full py-2.5 rounded-xl bg-indigo-500/10 text-indigo-500 font-semibold text-sm hover:bg-indigo-500/20 transition-colors">
-              {t.adminRewards.executeMonthly}
-            </button>
-          </div>
-        </div>
-
+      <div className="grid grid-cols-1 gap-6">
         {/* Audit Log */}
         <div className="glass rounded-2xl p-5 flex flex-col h-[600px]">
           <h2 className="font-semibold flex items-center gap-2 mb-4"><History className="h-5 w-5" /> {t.adminRewards.auditLog}</h2>

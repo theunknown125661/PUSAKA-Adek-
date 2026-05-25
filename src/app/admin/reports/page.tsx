@@ -69,11 +69,10 @@ interface WalletTransactionModel {
 
 interface PayoutRequestModel {
   id: string;
-  user_id: string;
+  student_id: string;
   amount: number;
-  destination: string;
-  state: "REQUESTED" | "APPROVED" | "PAID" | "REJECTED";
-  created_at: string;
+  status: "pending" | "approved" | "redeemed" | "rejected" | "token_issued" | "expired" | "cancelled";
+  requested_at: string;
   processed_at: string | null;
 }
 
@@ -247,7 +246,7 @@ export default function AdminReportsPage() {
         supabase.from("streaks").select("*, profiles!inner(school_id)").eq("profiles.school_id", activeSchoolId),
         supabase.from("attendance_logs").select("*, profiles!inner(school_id, full_name), classes(name, grade_level)").eq("profiles.school_id", activeSchoolId).gte("attendance_date", startDate).lte("attendance_date", endDate),
         supabase.from("wallet_transactions").select("*, profiles!inner(school_id)").eq("profiles.school_id", activeSchoolId).gte("created_at", startIso).lte("created_at", endIso),
-        supabase.from("payout_requests").select("*, profiles!inner(school_id)").eq("profiles.school_id", activeSchoolId).gte("created_at", startIso).lte("created_at", endIso),
+        supabase.from("withdrawal_requests").select("*, profiles!inner(school_id)").eq("profiles.school_id", activeSchoolId).gte("requested_at", startIso).lte("requested_at", endIso),
         supabase.from("user_badges").select("*, profiles!inner(school_id), badges(*)").eq("profiles.school_id", activeSchoolId).gte("unlocked_at", startIso).lte("unlocked_at", endIso),
         supabase.from("purchases").select("*, shop_items(*), profiles!inner(school_id)").eq("profiles.school_id", activeSchoolId).gte("purchased_at", startIso).lte("purchased_at", endIso),
         supabase.from("classes").select("*").eq("school_id", activeSchoolId),
@@ -343,7 +342,7 @@ export default function AdminReportsPage() {
   // Filter logs, transactions, and payouts based on filtered students
   const filteredLogs = logs.filter(l => studentIdsSet.has(l.student_id));
   const filteredWalletTxs = walletTxs.filter(t => studentIdsSet.has(t.user_id));
-  const filteredPayouts = payouts.filter(p => studentIdsSet.has(p.user_id));
+  const filteredPayouts = payouts.filter(p => studentIdsSet.has(p.student_id));
   const filteredUserBadges = userBadges.filter(b => studentIdsSet.has(b.user_id));
   const filteredPurchases = purchases.filter(p => studentIdsSet.has(p.user_id));
 
@@ -404,8 +403,8 @@ export default function AdminReportsPage() {
   const rupiahToday = filteredWalletTxs.filter(t => t.currency_type === "RUPIAH" && format(new Date(t.created_at), "yyyy-MM-dd") === todayStr);
   const rupiahIssuedToday = rupiahToday.filter(t => t.amount > 0).reduce((sum, t) => sum + t.amount, 0);
 
-  const pendingWithdrawalCount = filteredPayouts.filter(p => p.state === "REQUESTED").length;
-  const paidWithdrawalCount = filteredPayouts.filter(p => p.state === "PAID").length;
+  const pendingWithdrawalCount = filteredPayouts.filter(p => p.status === "pending").length;
+  const paidWithdrawalCount = filteredPayouts.filter(p => p.status === "redeemed").length;
 
   // XP Today
   const logsToday = filteredLogs.filter(l => l.attendance_date === todayStr && l.status === "approved");
@@ -435,8 +434,8 @@ export default function AdminReportsPage() {
     const dayTxs = filteredWalletTxs.filter(t => format(new Date(t.created_at), "yyyy-MM-dd") === dateStr);
     
     const approved = dayLogs.filter(l => l.status === "approved").length;
-    const present = dayLogs.filter(l => l.status === "approved" && l.within_time_window).length;
-    const late = dayLogs.filter(l => l.status === "approved" && !l.within_time_window).length;
+    const present = dayLogs.filter(l => l.status === "approved" && (l.arrival_status === "early" || l.arrival_status === "normal" || (!l.arrival_status && l.within_time_window))).length;
+    const late = dayLogs.filter(l => l.status === "approved" && (l.arrival_status === "late" || (!l.arrival_status && !l.within_time_window))).length;
     const rejected = dayLogs.filter(l => l.status === "rejected").length;
     const excused = dayLogs.filter(l => l.status === "rejected" && isExcused(l)).length;
     const flagged = dayLogs.filter(l => l.teacher_flag_status !== null || l.fraud_flags?.length > 0).length;
@@ -637,16 +636,15 @@ export default function AdminReportsPage() {
       toast.error("No withdrawal requests available to export.");
       return;
     }
-    const headers = ["Request ID", "Student Name", "Amount (Rupiah)", "Destination", "State", "Requested At", "Processed At"];
+    const headers = ["Request ID", "Student Name", "Amount (Rupiah)", "Status", "Requested At", "Processed At"];
     const rows = filteredPayouts.map(p => {
-      const student = students.find(s => s.id === p.user_id);
+      const student = students.find(s => s.id === p.student_id);
       return [
         p.id,
         student?.full_name || "Unknown",
         p.amount,
-        p.destination,
-        p.state,
-        format(new Date(p.created_at), "yyyy-MM-dd HH:mm:ss"),
+        p.status,
+        format(new Date(p.requested_at), "yyyy-MM-dd HH:mm:ss"),
         p.processed_at ? format(new Date(p.processed_at), "yyyy-MM-dd HH:mm:ss") : "-"
       ];
     });
@@ -1048,8 +1046,8 @@ export default function AdminReportsPage() {
                         const classStudents = filteredStudents.filter(s => s.class_id === c.id);
                         const classLogs = filteredLogs.filter(l => l.class_id === c.id);
                         
-                        const presentCount = classLogs.filter(l => l.status === "approved" && l.within_time_window).length;
-                        const lateCount = classLogs.filter(l => l.status === "approved" && !l.within_time_window).length;
+                        const presentCount = classLogs.filter(l => l.status === "approved" && (l.arrival_status === "early" || l.arrival_status === "normal" || (!l.arrival_status && l.within_time_window))).length;
+                        const lateCount = classLogs.filter(l => l.status === "approved" && (l.arrival_status === "late" || (!l.arrival_status && !l.within_time_window))).length;
                         const rejectedCount = classLogs.filter(l => l.status === "rejected").length;
                         
                         const uniqueDates = Array.from(new Set(classLogs.map(l => l.attendance_date))).length || 1;
@@ -1299,21 +1297,21 @@ export default function AdminReportsPage() {
                       <span className="font-semibold text-amber-500 flex items-center gap-1.5">
                         <HelpCircle className="h-4 w-4" /> Pending Approval
                       </span>
-                      <span className="font-bold text-foreground">{filteredPayouts.filter(p => p.state === "REQUESTED").length} requests</span>
+                      <span className="font-bold text-foreground">{filteredPayouts.filter(p => p.status === "pending").length} requests</span>
                     </div>
 
                     <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-between text-xs">
                       <span className="font-semibold text-emerald-500 flex items-center gap-1.5">
                         <CheckCircle className="h-4 w-4" /> Paid Out (Released)
                       </span>
-                      <span className="font-bold text-foreground">{filteredPayouts.filter(p => p.state === "PAID").length} requests</span>
+                      <span className="font-bold text-foreground">{filteredPayouts.filter(p => p.status === "redeemed").length} requests</span>
                     </div>
 
                     <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-center justify-between text-xs">
                       <span className="font-semibold text-rose-500 flex items-center gap-1.5">
                         <XCircle className="h-4 w-4" /> Rejected Payouts
                       </span>
-                      <span className="font-bold text-foreground">{filteredPayouts.filter(p => p.state === "REJECTED").length} requests</span>
+                      <span className="font-bold text-foreground">{filteredPayouts.filter(p => p.status === "rejected").length} requests</span>
                     </div>
 
                     <div className="text-center text-[10px] text-muted-foreground border-t border-border/50 pt-3">

@@ -6,11 +6,11 @@ import { createClient } from "@/lib/supabase/client";
 import { toLocalYYYYMMDD } from "@/lib/utils/format";
 import { useUserRole } from "@/lib/hooks/use-user-role";
 import { useTranslation } from "@/lib/i18n/use-translation";
-import {
-  MapPin, Flame, Clock, ShieldAlert, CheckCircle2, GraduationCap,
-  Coins, Wallet, Gift, Store, History, Sparkles
-} from "lucide-react";
+import { GraduationCap, Trophy, ChevronRight, Lock, Map, Clock, ArrowRight, Play, ExternalLink, Calendar, Plus, X, Coins, CheckCircle2, Zap, Flame, ShieldAlert, Sparkles, MapPin, Check, Wallet, Gift, Store, History } from "lucide-react";
+import { XPProgressBar } from "@/components/shared/xp-progress-bar";
 import type { AttendanceLog } from "@/lib/types/database";
+import { calculateLevelAndProgress } from "@/lib/utils/gamification";
+import { useCheckinState } from "@/lib/hooks/use-checkin-state";
 
 export default function StudentDashboard() {
   const { profile } = useUserRole();
@@ -24,6 +24,13 @@ export default function StudentDashboard() {
   const [recentTransactions, setRecentTransactions] = useState<any[]>([]);
   const [rewardsPreview, setRewardsPreview] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
+  const [countdownText, setCountdownText] = useState<string>("");
+
+  const checkinState = useCheckinState(profile?.id);
+  const { rewardRules, isHoliday, holidayConfig: holidayToday, weekHolidays, status: checkinStatus, canCheckIn, timePhase } = checkinState;
+  const isHolidayToday = isHoliday;
+  const isAbsentToday = checkinStatus === "absent" || checkinStatus === "after_absent";
+
 
   useEffect(() => {
     if (!profile) return;
@@ -55,14 +62,16 @@ export default function StudentDashboard() {
           supabase.from("user_cosmetics").select("cosmetic_id").eq("user_id", profile!.id)
         ]);
 
+        const todayLog = attRes.data ? attRes.data.find(log => log.attendance_date === today) : null;
         if (attRes.data) {
           setRecentLogs(attRes.data);
-          const todayLog = attRes.data.find(log => log.attendance_date === today);
           if (todayLog) setTodayAttendance(todayLog);
         }
         
         if (streakRes.data) {
-          setStreak({ current: streakRes.data.current_streak, longest: streakRes.data.longest_streak });
+          const isStreakBrokenToday = !todayLog && timePhase === 'ended' && !isHoliday && (rewardRules?.economy_config?.active_days?.includes(new Date().getDay()) ?? false);
+          const displayStreak = isStreakBrokenToday ? 0 : (streakRes.data.current_streak || 0);
+          setStreak({ current: displayStreak, longest: streakRes.data.longest_streak });
         } else {
           setStreak({ current: 0, longest: 0 }); 
         }
@@ -110,7 +119,67 @@ export default function StudentDashboard() {
     load();
   }, [profile]);
 
-  if (!isClient || loading) {
+  useEffect(() => {
+    if ((!rewardRules && !checkinState.activePolicy) || todayAttendance) {
+      setCountdownText("");
+      return;
+    }
+
+    const updateCountdown = () => {
+      const todayDate = new Date();
+      if (checkinState.isWeekend || checkinState.isHoliday) {
+        setCountdownText("");
+        return;
+      }
+
+      let startStr = "";
+      let endStr = "";
+      
+      if (checkinState.activePolicy) {
+         startStr = checkinState.activePolicy.checkin_open_at;
+         endStr = checkinState.activePolicy.absent_after_at;
+      } else if (rewardRules) {
+         startStr = rewardRules.attendance_start_time;
+         endStr = rewardRules.attendance_end_time;
+      }
+
+      if (!startStr || !endStr) return;
+
+      const [sH, sM] = startStr.split(":").map(Number);
+      const [eH, eM] = endStr.split(":").map(Number);
+      
+      const startDeadline = new Date();
+      startDeadline.setHours(sH, sM, 0, 0);
+      
+      const endDeadline = new Date();
+      endDeadline.setHours(eH, eM, 0, 0);
+
+      const nowMs = todayDate.getTime();
+      
+      if (nowMs < startDeadline.getTime()) {
+        const diffMs = startDeadline.getTime() - nowMs;
+        const h = Math.floor(diffMs / 3600000);
+        const m = Math.floor((diffMs % 3600000) / 60000);
+        const s = Math.floor((diffMs % 60000) / 1000);
+        setCountdownText(`Opens in ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
+      } else if (nowMs < endDeadline.getTime()) {
+        const diffMs = endDeadline.getTime() - nowMs;
+        const h = Math.floor(diffMs / 3600000);
+        const m = Math.floor((diffMs % 3600000) / 60000);
+        const s = Math.floor((diffMs % 60000) / 1000);
+        setCountdownText(`Closes in ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
+      } else {
+        setCountdownText("Time's up");
+      }
+    };
+
+    updateCountdown();
+    const interval = setInterval(updateCountdown, 1000);
+
+    return () => clearInterval(interval);
+  }, [rewardRules, checkinState.activePolicy, todayAttendance, checkinState.isWeekend, checkinState.isHoliday]);
+
+  if (!isClient || loading || checkinState.loading) {
     return <DashboardSkeleton />;
   }
 
@@ -206,10 +275,13 @@ export default function StudentDashboard() {
   const streakStyles = getStreakStyles(streak.current);
   
   // XP Progress Calculation
-  const currentLevel = profile?.level || 1;
   const currentXp = profile?.xp || 0;
-  const xpForNextLevel = currentLevel * 100;
-  const xpPct = Math.min((currentXp / xpForNextLevel) * 100, 100);
+  const { 
+    level: currentLevel, 
+    xpInCurrentLevel, 
+    xpForNextLevel, 
+    progressPct: xpPct 
+  } = calculateLevelAndProgress(currentXp, rewardRules?.economy_config, profile?.level);
 
   // Wallets check
   const coinWallet = wallets.find(w => w.currency_type === "COIN");
@@ -254,17 +326,17 @@ export default function StudentDashboard() {
         {/* Left Column (Streak Calendar + Check-in CTA + Wallet Row) */}
         <div className="space-y-6">
           {/* Dynamic Streak Calendar Hero Card */}
-          <div className={`relative rounded-[32px] overflow-hidden bg-gradient-to-br ${streakStyles.bgGradient} border border-border/30 aspect-[4/3] w-full shadow-sm flex flex-col justify-between p-6 transition-all duration-500`}>
+          <div className={`relative rounded-[32px] overflow-hidden bg-gradient-to-br ${streakStyles.bgGradient} border border-border/30 w-full shadow-sm flex flex-col p-6 sm:p-8 transition-all duration-500 gap-8 min-h-[400px]`}>
             {/* Top: Current Streak big fire */}
             <div className="flex-1 flex flex-col items-center justify-center text-center">
               <div 
-                className={`${streakStyles.badgeSize} rounded-[28px] bg-gradient-to-br ${streakStyles.badgeGradient} flex items-center justify-center text-white shadow-xl ${streakStyles.shadowColor} hover:scale-105 transition-all duration-300 mb-4 relative`}
+                className={`${streakStyles.badgeSize} rounded-[32px] bg-gradient-to-br ${streakStyles.badgeGradient} flex items-center justify-center text-white shadow-xl ${streakStyles.shadowColor} hover:scale-105 transition-transform duration-500 mb-6 relative`}
                 style={{ "--glow-color": streakStyles.glowColor } as React.CSSProperties}
               >
                 <Flame className={`${streakStyles.iconSize} fill-white/20 ${streakStyles.pulse} transition-all duration-300`} />
                 {/* Float particles if streak is active */}
                 {streak.current > 0 && (
-                  <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-[28px]">
+                  <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-[32px]">
                     <div className="particle absolute bottom-2 left-1/3 w-1 h-1 bg-amber-400 rounded-full" style={{ animationDelay: '0s' }} />
                     <div className="particle absolute bottom-2 left-1/2 w-1.5 h-1.5 bg-orange-400 rounded-full" style={{ animationDelay: '0.5s' }} />
                     <div className="particle absolute bottom-2 left-2/3 w-1 h-1 bg-yellow-400 rounded-full" style={{ animationDelay: '1s' }} />
@@ -272,12 +344,82 @@ export default function StudentDashboard() {
                   </div>
                 )}
               </div>
-              <h2 className="text-4xl font-black text-foreground tracking-tighter leading-none mb-1">
-                {streak.current} <span className="text-xl font-bold text-muted-foreground">Days</span>
+              <h2 className="text-5xl font-black text-foreground tracking-tighter leading-none mb-2">
+                {streak.current} <span className="text-2xl font-bold text-muted-foreground">{streak.current < 2 ? "Day" : "Days"}</span>
               </h2>
-              <p className={`text-xs font-extrabold ${streakStyles.textColor} uppercase tracking-widest`}>
+              <p className={`text-sm font-extrabold ${streakStyles.textColor} uppercase tracking-widest`}>
                 {streak.current >= 30 ? "Supernova 🔥" : streak.current >= 14 ? "Ultra Violet ⚡" : streak.current >= 7 ? "Solar Flare ☀️" : streak.current >= 3 ? "Combustion 🌋" : streak.current > 0 ? "Kindling 🌱" : "Cold ❄️"}
               </p>
+
+              {/* Daily status pill / Countdown */}
+              {(() => {
+                if (todayAttendance) {
+                  const status = todayAttendance.status;
+                  if (status === "approved") {
+                    return (
+                      <div className="mt-3 flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-full">
+                        <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                        <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Streak Secured</span>
+                      </div>
+                    );
+                  } else if (status.startsWith("pending_")) {
+                    return (
+                      <div className="mt-3 flex items-center gap-1 bg-amber-500/10 border border-amber-500/20 px-3 py-1 rounded-full animate-pulse">
+                        <Clock className="h-3 w-3 text-amber-500 animate-spin-slow" />
+                        <span className="text-[9px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-wider">Awaiting Approval</span>
+                      </div>
+                    );
+                  } else {
+                    return (
+                      <div className="mt-3 flex items-center gap-1 bg-rose-500/10 border border-rose-500/20 px-3 py-1 rounded-full">
+                        <ShieldAlert className="h-3 w-3 text-rose-500" />
+                        <span className="text-[9px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-wider">Check-in Rejected</span>
+                      </div>
+                    );
+                  }
+                } else {
+                  const activeDays = rewardRules?.economy_config?.active_days || [1, 2, 3, 4, 5];
+                  const isWeekend = !activeDays.includes(new Date().getDay());
+                  if (isWeekend) {
+                    return (
+                      <div className="mt-3 flex items-center gap-1 bg-slate-500/10 border border-slate-500/20 px-3 py-1 rounded-full">
+                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider">Weekend</span>
+                      </div>
+                    );
+                  } else if (isHolidayToday && holidayToday) {
+                    return (
+                      <div 
+                        className="mt-3 flex items-center gap-1 px-3 py-1 rounded-full border shadow-sm transition-all"
+                        style={{
+                          backgroundColor: `${holidayToday.color_hex || "#3b82f6"}10`,
+                          borderColor: `${holidayToday.color_hex || "#3b82f6"}30`,
+                        }}
+                      >
+                        <span 
+                          className="text-[9px] font-black uppercase tracking-wider"
+                          style={{ color: holidayToday.color_hex || "#3b82f6" }}
+                        >
+                          {holidayToday.name}
+                        </span>
+                      </div>
+                    );
+                  } else if (isAbsentToday) {
+                    return (
+                      <div className="mt-3 flex items-center gap-1 bg-rose-500/10 border border-rose-500/20 px-3 py-1 rounded-full">
+                        <ShieldAlert className="h-3 w-3 text-rose-500" />
+                        <span className="text-[9px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-wider">Absent Today</span>
+                      </div>
+                    );
+                  } else if (countdownText) {
+                    return (
+                      <div className="mt-3 flex items-center gap-1.5 bg-primary/10 border border-primary/20 px-3 py-1 rounded-full">
+                        <span className="text-[9px] font-black text-primary uppercase tracking-wider">Check-in Open</span>
+                      </div>
+                    );
+                  }
+                }
+                return null;
+              })()}
             </div>
 
             {/* Bottom: 7-day mini calendar tracker */}
@@ -293,11 +435,28 @@ export default function StudentDashboard() {
 
                   return dates.map((date, idx) => {
                     const dateStr = toLocalYYYYMMDD(date);
-                    const log = recentLogs.find(l => l.attendance_date === dateStr);
+                    const log = recentLogs.find(l => l.attendance_date && l.attendance_date.startsWith(dateStr));
+                    const holiday = weekHolidays.find(h => h.date && h.date.startsWith(dateStr));
                     const isToday = toLocalYYYYMMDD(todayDate) === dateStr;
                     const isCheckedIn = !!log && log.status === "approved";
                     const isPending = !!log && (log.status === "pending_teacher_view" || log.status === "pending_admin_review");
                     const isRejected = !!log && log.status === "rejected";
+                    const isWeekend = !(rewardRules?.economy_config?.active_days || [1, 2, 3, 4, 5]).includes(date.getDay());
+                    
+                    let hasDatePassed = false;
+                    if (dateStr > toLocalYYYYMMDD(todayDate)) {
+                        hasDatePassed = false;
+                    } else if (isToday) {
+                        const endTime = rewardRules?.economy_config?.attendance_end_time;
+                        if (endTime) {
+                            const nowTime = new Date();
+                            const timeStr = `${String(nowTime.getHours()).padStart(2, "0")}:${String(nowTime.getMinutes()).padStart(2, "0")}`;
+                            if (timeStr > endTime) hasDatePassed = true;
+                        }
+                    } else {
+                        hasDatePassed = true;
+                    }
+                    const isAbsent = !log && !holiday && !isWeekend && hasDatePassed;
 
                     return (
                       <div key={idx} className="flex flex-col items-center gap-1.5 flex-1 group relative cursor-default">
@@ -305,22 +464,45 @@ export default function StudentDashboard() {
                         <div className="absolute bottom-full mb-1 flex-col items-center z-10 pointer-events-none opacity-0 group-hover:opacity-100 translate-y-1 group-hover:translate-y-0 transition-all duration-200 hidden sm:flex">
                           <div className="bg-background text-foreground border border-border px-2 py-1 rounded-lg shadow-lg text-[9px] font-bold whitespace-nowrap capitalize">
                             {date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
-                            {log ? ` (${log.status.replace(/_/g, ' ')})` : ""}
+                            {log ? (
+                              log.status === "approved" ? (
+                                log.before_early_cutoff 
+                                  ? ` (${t.history.early})` 
+                                  : log.within_time_window === false 
+                                    ? ` (${t.history.late})` 
+                                    : ` (${t.history.onTime})`
+                              ) : log.status.startsWith("pending_") 
+                                ? ` (${t.history.filters.pending})` 
+                                : ` (${t.history.filters.rejected})`
+                            ) : holiday ? ` (${holiday.name})` : isWeekend ? ` (Weekend)` : isAbsent ? ` (Absent)` : ""}
                           </div>
                           <div className="w-1.5 h-1.5 bg-background border-r border-b border-border rotate-45 -mt-1" />
                         </div>
                         
-                        <div className={`w-full aspect-square max-w-[32px] rounded-xl flex items-center justify-center transition-all duration-300 ${
-                          isCheckedIn 
-                            ? `bg-gradient-to-br ${streakStyles.badgeGradient} shadow-md ${streakStyles.shadowColor} scale-110` 
-                            : isPending
-                              ? "bg-amber-500/10 border-2 border-amber-500/30 text-amber-500 animate-pulse"
-                              : isRejected
-                                ? "bg-rose-500/10 border-2 border-rose-500/30 text-rose-500"
-                                : isToday
-                                  ? "bg-muted border-2 border-primary/50"
-                                  : "bg-muted border border-border/50"
-                        }`}>
+                        <div 
+                          className={`w-full aspect-square max-w-[32px] rounded-xl flex items-center justify-center transition-all duration-300 ${
+                            isCheckedIn 
+                              ? `bg-gradient-to-br ${streakStyles.badgeGradient} shadow-md ${streakStyles.shadowColor} scale-110` 
+                              : isPending
+                                ? "bg-amber-500/10 border-2 border-amber-500/30 text-amber-500 animate-pulse"
+                                : (isRejected || isAbsent)
+                                  ? "bg-rose-500/10 border-2 border-rose-500/30 text-rose-500"
+                                  : holiday
+                                  ? "border-2 shadow-sm"
+                                  : isWeekend
+                                    ? "bg-slate-500/10 border-2 border-slate-500/30 text-slate-500"
+                                    : isToday
+                                      ? "bg-muted border-2 border-primary/50"
+                                      : dateStr > toLocalYYYYMMDD(todayDate)
+                                        ? "bg-card border border-border/40 text-muted-foreground/30"
+                                        : "bg-muted border border-border/50"
+                          }`}
+                          style={(!isCheckedIn && !isPending && !isRejected && !isAbsent && holiday) ? {
+                            backgroundColor: `${holiday?.color_hex || "#3b82f6"}20`,
+                            borderColor: `${holiday?.color_hex || "#3b82f6"}50`,
+                            color: holiday?.color_hex || "#3b82f6"
+                          } : {}}
+                        >
                           {isCheckedIn ? (
                             <Flame className="h-4 w-4 text-white fill-white/20" />
                           ) : isPending ? (
@@ -328,7 +510,7 @@ export default function StudentDashboard() {
                           ) : isRejected ? (
                             <ShieldAlert className="h-4 w-4" />
                           ) : (
-                            <span className={`text-[10px] font-bold ${isToday ? 'text-primary' : 'text-muted-foreground'}`}>
+                            <span className={`text-[10px] font-bold ${(!holiday && isToday) ? 'text-primary' : (!holiday) ? 'text-muted-foreground' : ''}`}>
                               {date.getDate()}
                             </span>
                           )}
@@ -348,59 +530,101 @@ export default function StudentDashboard() {
           <div className="card rounded-[32px] p-6 border border-border/30 bg-card text-center space-y-4 shadow-sm relative overflow-hidden transition-all duration-300 hover:shadow-md">
             <div className="absolute inset-0 bg-gradient-to-tr from-primary/5 via-transparent to-primary/5 opacity-50 pointer-events-none" />
 
-            <h2 className="text-lg font-black text-foreground relative z-10">Ready for today?</h2>
-            <p className="text-xs text-muted-foreground max-w-xs mx-auto leading-relaxed relative z-10">
-              {hasClass 
-                ? hasCheckedInToday
-                  ? isApproved
-                    ? "Excellent! Your attendance is verified and your streak is secured today."
-                    : isPending
-                      ? "We've received your check-in! Once a teacher or admin approves it, your streak will update."
-                      : "Your check-in was rejected. Please contact your teacher if you believe this is an error."
-                  : "Check in to keep your streak alive and earn 50 XP + Coins!"
-                : "Please join a class to begin logging your daily attendance."}
-            </p>
-            
-            <div className="pt-2 flex justify-center relative z-10">
-              {!hasClass ? (
-                <Link 
-                  href="/student/class" 
-                  className="w-full max-w-[220px] bg-primary text-white font-extrabold text-sm py-3.5 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-primary/20 border-0 hover:brightness-105 active:scale-[0.98] transition-all duration-200"
-                >
-                  <GraduationCap className="h-4.5 w-4.5" />
-                  Join Class
-                </Link>
-              ) : !hasCheckedInToday ? (
-                <Link 
-                  href="/student/check-in" 
-                  className="w-full max-w-[220px] bg-primary text-white font-extrabold text-sm py-3.5 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-primary/20 border-0 hover:brightness-105 active:scale-[0.98] transition-all duration-200"
-                >
-                  <MapPin className="h-4.5 w-4.5 animate-bounce" />
-                  {t.dashboard.checkInNow}
-                </Link>
-              ) : (
-                <div className="flex items-center justify-center gap-2.5 bg-muted/40 border border-border/30 px-5 py-3.5 rounded-2xl w-full max-w-[260px] shadow-inner">
-                  {isApproved && (
-                    <>
-                      <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" />
-                      <span className="text-xs font-extrabold text-emerald-600 dark:text-emerald-500">Streak Secured today!</span>
-                    </>
-                  )}
-                  {isPending && (
-                    <>
-                      <Clock className="h-5 w-5 text-amber-500 shrink-0 animate-spin-slow" />
-                      <span className="text-xs font-extrabold text-amber-600 dark:text-amber-500">Awaiting approval...</span>
-                    </>
-                  )}
-                  {isRejected && (
-                    <>
-                      <ShieldAlert className="h-5 w-5 text-rose-500 shrink-0" />
-                      <span className="text-xs font-extrabold text-rose-600 dark:text-rose-500">Check-in Rejected</span>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
+            {(() => {
+              const activeDays = rewardRules?.economy_config?.active_days || [1, 2, 3, 4, 5];
+              const isWeekendToday = !activeDays.includes(new Date().getDay());
+
+              return (
+                <>
+                  <h2 className="text-lg font-black text-foreground relative z-10">
+                    {!hasClass ? "Ready for today?" : isHolidayToday ? "Enjoy your holiday!" : isWeekendToday ? "Enjoy your day off!" : "Ready for today?"}
+                  </h2>
+                  <p className="text-xs text-muted-foreground max-w-xs mx-auto leading-relaxed relative z-10">
+                    {hasClass 
+                      ? isHolidayToday
+                        ? "School is closed for a holiday. Relax and recharge!"
+                        : isWeekendToday
+                        ? "It's not an active school day. Relax and recharge!"
+                        : hasCheckedInToday
+                          ? isApproved
+                            ? "Excellent! Your attendance is verified and your streak is secured today."
+                            : isPending
+                              ? "We've received your check-in! Once a teacher or admin approves it, your streak will update."
+                              : "Your check-in was rejected. Please contact your teacher if you believe this is an error."
+                          : isAbsentToday
+                            ? "You missed today's check-in window. This day is counted as absent."
+                            : `Check in to keep your streak alive and earn ${rewardRules?.economy_config?.xp?.attendance_present ?? 50} XP + Coins!`
+                      : "Please join a class to begin logging your daily attendance."}
+                  </p>
+                  
+                  <div className="pt-2 flex justify-center relative z-10">
+                    {!hasClass ? (
+                      <Link 
+                        href="/student/class" 
+                        className="w-full max-w-[220px] bg-primary text-white font-extrabold text-sm py-3.5 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-primary/20 border-0 hover:brightness-105 active:scale-[0.98] transition-all duration-200"
+                      >
+                        <GraduationCap className="h-4.5 w-4.5" />
+                        Join Class
+                      </Link>
+                    ) : isHolidayToday || isWeekendToday ? (
+                      <div className="flex items-center justify-center gap-2.5 bg-slate-500/10 border border-slate-500/20 px-5 py-3.5 rounded-2xl w-full max-w-[260px] shadow-inner">
+                        <span className="text-xs font-extrabold text-slate-500">{isHolidayToday ? "School closed today" : "Not a school day"}</span>
+                      </div>
+                    ) : hasCheckedInToday ? (
+                      <div className="flex items-center justify-center gap-2.5 bg-muted/40 border border-border/30 px-5 py-3.5 rounded-2xl w-full max-w-[260px] shadow-inner">
+                        {isApproved && (
+                          <>
+                            <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" />
+                            <span className="text-xs font-extrabold text-emerald-600 dark:text-emerald-500">Streak Secured today!</span>
+                          </>
+                        )}
+                        {isPending && (
+                          <>
+                            <Clock className="h-5 w-5 text-amber-500 shrink-0 animate-spin-slow" />
+                            <span className="text-xs font-extrabold text-amber-600 dark:text-amber-500">Awaiting approval...</span>
+                          </>
+                        )}
+                        {isRejected && (
+                          <>
+                            <ShieldAlert className="h-5 w-5 text-rose-500 shrink-0" />
+                            <span className="text-xs font-extrabold text-rose-600 dark:text-rose-500">Check-in Rejected</span>
+                          </>
+                        )}
+                      </div>
+                    ) : isAbsentToday ? (
+                      <div className="flex items-center justify-center gap-2.5 bg-rose-500/10 border border-rose-500/20 px-5 py-3.5 rounded-2xl w-full max-w-[260px] shadow-inner">
+                        <ShieldAlert className="h-5 w-5 text-rose-500 shrink-0" />
+                        <span className="text-xs font-extrabold text-rose-600 dark:text-rose-500">Absent</span>
+                      </div>
+                    ) : countdownText.startsWith("Opens in") ? (
+                      <div className="flex flex-col items-center justify-center gap-1.5 bg-muted/40 border border-border/30 px-5 py-3 rounded-2xl w-full max-w-[260px] shadow-inner">
+                        <div className="flex items-center gap-2">
+                          <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <span className="text-xs font-extrabold text-muted-foreground">Not Open Yet</span>
+                        </div>
+                        <span className="text-[10px] font-bold text-muted-foreground/80">{countdownText}</span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center w-full max-w-[220px]">
+                        <Link 
+                          href="/student/check-in" 
+                          className="w-full bg-primary text-white font-extrabold text-sm py-3.5 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-primary/20 border-0 hover:brightness-105 active:scale-[0.98] transition-all duration-200"
+                        >
+                          <MapPin className="h-4.5 w-4.5 animate-bounce" />
+                          {t.dashboard.checkInNow}
+                        </Link>
+                        {countdownText && (
+                          <div className="flex items-center gap-1.5 text-[10px] font-black text-primary uppercase tracking-wider mt-3 bg-primary/10 px-3 py-1.5 rounded-full animate-pulse">
+                            <Clock className="h-3.5 w-3.5 animate-spin-slow" />
+                            {countdownText.startsWith("Closes in") ? countdownText : `Closes in ${countdownText}`}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
           </div>
 
           {/* Level & XP Card */}
@@ -415,15 +639,17 @@ export default function StudentDashboard() {
               </div>
             </div>
             <div className="mt-4">
-              <div className="flex justify-between text-[10px] font-bold text-muted-foreground mb-1.5 leading-none">
-                <span>{currentXp} XP</span>
-                <span>{xpForNextLevel} XP to Level {currentLevel + 1}</span>
-              </div>
-              <div className="w-full h-2.5 bg-muted rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-primary rounded-full transition-all duration-500" 
-                  style={{ width: `${xpPct}%` }}
+              <div className="mb-2">
+                <XPProgressBar 
+                  xp={currentXp} 
+                  economyConfig={rewardRules?.economy_config} 
+                  userLevel={profile?.level} 
+                  showDetails={false}
                 />
+              </div>
+              <div className="flex justify-between text-[10px] font-bold text-muted-foreground leading-none">
+                <span>{xpInCurrentLevel} / {xpForNextLevel} XP (Total: {currentXp} XP)</span>
+                <span>Next Level {currentLevel + 1}</span>
               </div>
             </div>
           </div>

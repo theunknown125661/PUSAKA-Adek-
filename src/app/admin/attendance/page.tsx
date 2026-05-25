@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useTranslation } from "@/lib/i18n/use-translation";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { ArrivalBadge } from "@/components/shared/arrival-badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatDate, formatTime, formatDistance, formatAccuracy } from "@/lib/utils/format";
 import { flagLabel, type FraudFlag } from "@/lib/utils/fraud-flags";
@@ -24,7 +25,7 @@ export default function AttendanceReviewPage() {
     async function load() {
       const { data } = await supabase
         .from("attendance_logs")
-        .select("*, profiles(full_name, email), classes(name)")
+        .select("*, profiles(full_name, email, avatar_url), classes(name), schools(name)")
         .in("status", ["pending_teacher_view", "pending_admin_review"])
         .order("submitted_at", { ascending: true });
       // Sort flagged first
@@ -105,12 +106,34 @@ export default function AttendanceReviewPage() {
         <div className="space-y-4">
           {logs.map((log) => (
             <div key={log.id} className="card rounded-[32px] p-6 border border-border/30 bg-card shadow-sm space-y-5">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="font-black text-lg text-foreground">{(log.profiles as unknown as { full_name: string })?.full_name}</p>
-                  <p className="text-xs font-bold text-muted-foreground mt-0.5">{(log.classes as unknown as { name: string })?.name} · {formatDate(log.attendance_date)} · {formatTime(log.submitted_at)}</p>
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                  <div className="h-12 w-12 sm:h-14 sm:w-14 rounded-full overflow-hidden bg-muted border border-border/40 shrink-0 shadow-sm">
+                    {(log.profiles as any)?.avatar_url ? (
+                      <img src={(log.profiles as any).avatar_url} alt="Avatar" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="h-full w-full flex items-center justify-center bg-primary/10 text-primary font-black text-lg">
+                        {(log.profiles as any)?.full_name?.charAt(0)?.toUpperCase() || '?'}
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-black text-lg text-foreground leading-none">{(log.profiles as any)?.full_name}</p>
+                      <span className="text-[10px] bg-muted/60 text-muted-foreground px-2 py-0.5 rounded-full font-bold border border-border/40">
+                        {(log.profiles as any)?.email}
+                      </span>
+                    </div>
+                    <div className="text-xs font-bold text-muted-foreground flex flex-wrap items-center gap-1.5">
+                      <span className="text-foreground/80">{(log as any).schools?.name}</span>
+                      <span className="opacity-50">•</span>
+                      <span>{(log as any).classes?.name}</span>
+                      <span className="opacity-50">•</span>
+                      <span>{formatDate(log.attendance_date)} {formatTime(log.submitted_at)}</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
                   {log.teacher_flag_status && <StatusBadge status="flagged" />}
                   <StatusBadge status={log.status} />
                 </div>
@@ -123,9 +146,8 @@ export default function AttendanceReviewPage() {
                     <div className="bg-muted/40 border border-border/30 rounded-2xl p-3 flex flex-col justify-center"><span className="text-muted-foreground mb-1">{t.adminAttendance.distance}</span> <span className="text-sm">{formatDistance(log.distance_m)}</span></div>
                     <div className="bg-muted/40 border border-border/30 rounded-2xl p-3 flex flex-col justify-center"><span className="text-muted-foreground mb-1">{t.adminAttendance.accuracy}</span> <span className="text-sm">{formatAccuracy(log.accuracy_m)}</span></div>
                     <div className="bg-muted/40 border border-border/30 rounded-2xl p-3 flex flex-col justify-center"><span className="text-muted-foreground mb-1">{t.adminAttendance.inRadius}</span> <span className={`text-sm ${log.within_radius ? "text-emerald-500" : "text-rose-500"}`}>{log.within_radius ? t.adminAttendance.yes : t.adminAttendance.no}</span></div>
-                    <div className="bg-muted/40 border border-border/30 rounded-2xl p-3 flex flex-col justify-center"><span className="text-muted-foreground mb-1">{t.adminAttendance.onTime}</span> <span className={`text-sm ${log.within_time_window ? "text-emerald-500" : "text-rose-500"}`}>{log.within_time_window ? t.adminAttendance.yes : t.adminAttendance.no}</span></div>
+                    <div className="bg-muted/40 border border-border/30 rounded-2xl p-3 flex flex-col justify-center"><span className="text-muted-foreground mb-1">Timing</span> <div><ArrivalBadge log={log} showIcon /></div></div>
                   </div>
-                  {log.before_early_cutoff && <span className="text-xs text-amber-500 font-bold inline-block mt-2">🌅 {t.adminAttendance.earlyBird}</span>}
                   {log.fraud_flags && log.fraud_flags.length > 0 && (
                     <div className="flex flex-wrap gap-2 mt-2">
                       {log.fraud_flags.map((f) => (

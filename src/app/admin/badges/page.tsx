@@ -14,6 +14,8 @@ const IconMap: Record<string, React.ComponentType<{ className?: string }>> = {
 export default function AdminBadgesPage() {
   const { t, isClient } = useTranslation();
   const [badges, setBadges] = useState<Badge[]>([]);
+  const [schools, setSchools] = useState<{id: string, name: string}[]>([]);
+  const [classes, setClasses] = useState<{id: string, name: string, school_id: string}[]>([]);
   const [loading, setLoading] = useState(true);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -29,6 +31,8 @@ export default function AdminBadgesPage() {
     family: "streak",
     unlock_type: "streak",
     unlock_value: 1,
+    school_id: "" as string | null,
+    class_id: "" as string | null,
     active: true
   });
 
@@ -38,13 +42,17 @@ export default function AdminBadgesPage() {
 
   async function fetchBadges() {
     const supabase = createClient();
-    const { data } = await supabase
-      .from("badges")
-      .select("*")
-      .order("family")
-      .order("rarity");
     
-    if (data) setBadges(data as Badge[]);
+    const [badgesRes, schoolsRes, classesRes] = await Promise.all([
+      supabase.from("badges").select("*").order("family").order("rarity"),
+      supabase.from("schools").select("id, name").order("name"),
+      supabase.from("classes").select("id, name, school_id").order("name")
+    ]);
+    
+    if (badgesRes.data) setBadges(badgesRes.data as Badge[]);
+    if (schoolsRes.data) setSchools(schoolsRes.data);
+    if (classesRes.data) setClasses(classesRes.data);
+    
     setLoading(false);
   }
 
@@ -59,6 +67,8 @@ export default function AdminBadgesPage() {
         family: badge.family,
         unlock_type: badge.unlock_rule?.type || "streak",
         unlock_value: badge.unlock_rule?.value || 1,
+        school_id: badge.school_id || "",
+        class_id: badge.class_id || "",
         active: badge.active
       });
     } else {
@@ -71,6 +81,8 @@ export default function AdminBadgesPage() {
         family: "streak",
         unlock_type: "streak",
         unlock_value: 1,
+        school_id: "",
+        class_id: "",
         active: true
       });
     }
@@ -96,6 +108,8 @@ export default function AdminBadgesPage() {
         type: formData.unlock_type,
         value: formData.unlock_value
       },
+      school_id: formData.school_id || null,
+      class_id: formData.class_id || null,
       active: formData.active
     };
 
@@ -172,10 +186,25 @@ export default function AdminBadgesPage() {
               }`}
             >
               <div className="flex justify-between items-center mb-3">
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-muted/60 text-muted-foreground border border-border/30">
-                  {badge.family}
-                </span>
-                <div className="flex gap-1">
+                <div className="flex flex-wrap gap-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-muted/60 text-muted-foreground border border-border/30">
+                    {badge.family}
+                  </span>
+                  {!badge.school_id && !badge.class_id ? (
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+                      Global
+                    </span>
+                  ) : badge.school_id && !badge.class_id ? (
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                      School
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                      Class
+                    </span>
+                  )}
+                </div>
+                <div className="flex gap-1 shrink-0">
                   <button onClick={() => openModal(badge)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
                     <Edit2 className="h-3.5 w-3.5" />
                   </button>
@@ -312,6 +341,36 @@ export default function AdminBadgesPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
+                  <label className="text-sm font-medium mb-1 block">Scope: School</label>
+                  <select 
+                    className="input w-full" 
+                    value={formData.school_id || ""} 
+                    onChange={(e) => setFormData({ ...formData, school_id: e.target.value, class_id: "" })}
+                  >
+                    <option value="">Global (All Schools)</option>
+                    {schools.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1 block">Scope: Class</label>
+                  <select 
+                    className="input w-full" 
+                    value={formData.class_id || ""} 
+                    onChange={(e) => setFormData({ ...formData, class_id: e.target.value })}
+                    disabled={!formData.school_id}
+                  >
+                    <option value="">All Classes in School</option>
+                    {classes.filter(c => c.school_id === formData.school_id).map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
                   <label className="text-sm font-medium mb-1 block">{t.adminBadges.familyLabel}</label>
                   <input 
                     type="text" 
@@ -357,7 +416,7 @@ export default function AdminBadgesPage() {
                       type="number" 
                       className="input w-full" 
                       value={formData.unlock_value} 
-                      onChange={(e) => setFormData({ ...formData, unlock_value: parseInt(e.target.value) || 1 })}
+                      onChange={(e) => setFormData({ ...formData, unlock_value: e.target.value === '' ? ('' as any) : (parseInt(e.target.value) || 0) })}
                     />
                   </div>
                 </div>

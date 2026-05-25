@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useTranslation } from "@/lib/i18n/use-translation";
-import { formatCurrency } from "@/lib/utils/format";
+import { formatCurrency, toLocalYYYYMMDD } from "@/lib/utils/format";
 import { ClipboardCheck, AlertTriangle, CheckCircle, XCircle, Wallet, Clock, Activity, Users, Gift, ChevronRight } from "lucide-react";
 import type { AttendanceReview } from "@/lib/types/database";
 
@@ -26,7 +26,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     const supabase = createClient();
-    const today = new Date().toISOString().split("T")[0];
+    const today = toLocalYYYYMMDD(new Date());
     
     // Calculate date for 7 days ago
     const sevenDaysAgo = new Date();
@@ -42,7 +42,7 @@ export default function AdminDashboard() {
         supabase.from("attendance_logs").select("id", { count: "exact" }).not("teacher_flag_status", "is", null).eq("attendance_date", today),
         supabase.from("attendance_logs").select("id", { count: "exact" }).eq("status", "approved").eq("attendance_date", today),
         supabase.from("attendance_logs").select("id", { count: "exact" }).eq("status", "rejected").eq("attendance_date", today),
-        supabase.from("payout_requests").select("id", { count: "exact" }).eq("state", "REQUESTED"),
+        supabase.from("withdrawal_requests").select("id", { count: "exact" }).eq("status", "pending"),
         supabase.from("wallets").select("balance_locked"),
         supabase.from("profiles").select("id", { count: "exact" }).eq("role", "student"),
         supabase.from("wallet_transactions").select("amount").eq("event_type", "attendance_reward").gte("created_at", lastWeekIso),

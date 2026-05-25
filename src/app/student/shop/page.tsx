@@ -66,6 +66,7 @@ export default function StudentShopPage() {
   async function executePurchase() {
     if (!confirmItem) return;
     
+    const purchasedItem = confirmItem;
     setPurchasing(confirmItem.id);
     const supabase = createClient();
     
@@ -83,6 +84,21 @@ export default function StudentShopPage() {
       toast.error(data.error || t.shop.purchaseFailed);
     } else {
       toast.success(data.message || t.shop.purchaseSuccess);
+
+      // Notify admins about the shop purchase
+      fetch("/api/notify-admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "shop_purchase",
+          category: "transactional",
+          priority: "low",
+          title: "New Shop Purchase",
+          message: `${profile?.full_name || "A student"} purchased ${purchasedItem.name} for ${purchasedItem.price_coins} coins.`,
+          action_url: "/admin/reports",
+        }),
+      }).catch(err => console.error("Failed to send admin notification:", err));
+
       fetchShopData(); // Refresh
     }
   }

@@ -5,11 +5,23 @@ import { createClient } from "@/lib/supabase/client";
 import { Settings, Loader2, Save, MapPin, ShieldAlert, Coins, User } from "lucide-react";
 import { useTranslation } from "@/lib/i18n/use-translation";
 import { toast } from "sonner";
+import type { AttendancePolicy } from "@/lib/types/database";
+import { Clock, Wallet } from "lucide-react";
 
-import dynamic from "next/dynamic";
 
-const LocationMap = dynamic(() => import("@/components/admin/location-map"), { ssr: false });
 import AvatarUpload from "@/components/profile/avatar-upload";
+
+interface RulesConfig {
+  id: string;
+  base_reward: number;
+  early_bonus: number;
+  monthly_hold_bonus_pct: number;
+  attendance_start_time: string;
+  attendance_end_time: string;
+  early_cutoff_time: string;
+  min_withdrawal_amount: number;
+  economy_config?: any;
+}
 
 interface SchoolConfig {
   id: string;
@@ -36,6 +48,9 @@ export default function AdminSettingsPage() {
   const [msg, setMsg] = useState("");
   const [profileMsg, setProfileMsg] = useState("");
   const [passwordMsg, setPasswordMsg] = useState("");
+  const [rules, setRules] = useState<RulesConfig | null>(null);
+  const [policy, setPolicy] = useState<Partial<AttendancePolicy>>({});
+  const [rulesMsg, setRulesMsg] = useState("");
   
   const { t, interpolate, isClient } = useTranslation();
 
@@ -69,35 +84,55 @@ export default function AdminSettingsPage() {
         // Set the active school to edit
         const activeSchool = allSData.find(s => s.id === currentSchoolId) || allSData[0];
         setSchool(activeSchool as SchoolConfig);
+
+        // Fetch rules & policy
+        const [rRes, pRes] = await Promise.all([
+          supabase.from("reward_rules").select("*").eq("school_id", currentSchoolId).limit(1).maybeSingle(),
+          supabase.from("attendance_policies").select("*").eq("school_id", currentSchoolId).is("class_id", null).limit(1).maybeSingle(),
+        ]);
+        
+        if (rRes.data) {
+          setRules(rRes.data as RulesConfig);
+        } else {
+          setRules({
+            id: "",
+            base_reward: 5000,
+            early_bonus: 2000,
+            monthly_hold_bonus_pct: 5,
+            attendance_start_time: "06:00",
+            attendance_end_time: "09:00",
+            early_cutoff_time: "07:00",
+            min_withdrawal_amount: 10000,
+            economy_config: {}
+          });
+        }
+        
+        if (pRes.data) {
+          setPolicy(pRes.data as AttendancePolicy);
+        } else {
+          setPolicy({
+            checkin_open_at: "06:00",
+            early_start_at: "06:00",
+            early_end_at: "06:45",
+            normal_start_at: "06:46",
+            normal_end_at: "07:00",
+            late_start_at: "07:01",
+            late_end_at: "08:00",
+            absent_after_at: "08:00",
+            late_enabled: true,
+            late_grace_minutes: 5,
+            late_penalty_type: "points_deduction",
+            late_penalty_value: 5,
+          });
+        }
+
       }
       setLoading(false);
     }
     load();
   }, []);
 
-  const handleSave = async () => {
-    if (!school) return;
-    setSaving(true);
-    setMsg("");
-    const supabase = createClient();
-    
-    const { error } = await supabase
-      .from("schools")
-      .update({ 
-        name: school.name, 
-        latitude: school.latitude, 
-        longitude: school.longitude, 
-        radius_m: school.radius_m,
-        accuracy_tolerance_m: school.accuracy_tolerance_m || 100
-      })
-      .eq("id", school.id);
-      
-    if (error) setMsg(t.adminSettings.errorSaving);
-    else setMsg(t.adminSettings.successSaving);
-    
-    setSaving(false);
-    setTimeout(() => setMsg(""), 3000);
-  };
+
 
   const handleSaveProfile = async () => {
     if (!profile) return;
@@ -151,6 +186,127 @@ export default function AdminSettingsPage() {
     setTimeout(() => setPasswordMsg(""), 3000);
   };
 
+  const handleSaveSchoolRules = async () => {
+    if (!rules) return;
+    setSaving(true);
+    setRulesMsg("");
+    const supabase = createClient();
+    
+    let error;
+    if (!rules.id) {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: profile } = await supabase.from("profiles").select("school_id").eq("id", user?.id).single();
+      let schoolId = profile?.school_id;
+      if (!schoolId) {
+        const { data: firstSchool } = await supabase.from("schools").select("id").limit(1).single();
+        if (firstSchool) schoolId = firstSchool.id;
+      }
+      
+      if (!schoolId) {
+        setRulesMsg("Error: No schools exist in the database. Please create a school first.");
+        setSaving(false);
+        return;
+      }
+      
+      const cleanEconomyConfig = JSON.parse(JSON.stringify(rules.economy_config || {}));
+      const sanitizeObj = (obj: any) => {
+        for (const k in obj) {
+          if (obj[k] === "") obj[k] = 0;
+          else if (typeof obj[k] === "object" && obj[k] !== null) sanitizeObj(obj[k]);
+        }
+      };
+      sanitizeObj(cleanEconomyConfig);
+
+      const { data, error: insertError } = await supabase
+        .from("reward_rules")
+        .insert({ 
+          school_id: schoolId,
+          base_reward: rules.base_reward, 
+          early_bonus: rules.early_bonus, 
+          monthly_hold_bonus_pct: (rules.monthly_hold_bonus_pct as any) === "" ? 0 : rules.monthly_hold_bonus_pct, 
+          min_withdrawal_amount: (rules.min_withdrawal_amount as any) === "" ? 0 : rules.min_withdrawal_amount,
+          economy_config: cleanEconomyConfig,
+          attendance_start_time: policy.checkin_open_at || "06:00",
+          early_cutoff_time: policy.early_end_at || "06:45",
+          attendance_end_time: policy.absent_after_at || "08:00"
+        })
+        .select()
+        .single();
+      
+      error = insertError;
+      if (data) {
+        setRules(data as RulesConfig);
+      }
+    } else {
+      const cleanEconomyConfig = JSON.parse(JSON.stringify(rules.economy_config || {}));
+      const sanitizeObj = (obj: any) => {
+        for (const k in obj) {
+          if (obj[k] === "") obj[k] = 0;
+          else if (typeof obj[k] === "object" && obj[k] !== null) sanitizeObj(obj[k]);
+        }
+      };
+      sanitizeObj(cleanEconomyConfig);
+
+      const { error: updateError } = await supabase
+        .from("reward_rules")
+        .update({ 
+          base_reward: rules.base_reward, 
+          early_bonus: rules.early_bonus, 
+          monthly_hold_bonus_pct: (rules.monthly_hold_bonus_pct as any) === "" ? 0 : rules.monthly_hold_bonus_pct, 
+          min_withdrawal_amount: (rules.min_withdrawal_amount as any) === "" ? 0 : rules.min_withdrawal_amount,
+          economy_config: cleanEconomyConfig,
+          attendance_start_time: policy.checkin_open_at || "06:00",
+          early_cutoff_time: policy.early_end_at || "06:45",
+          attendance_end_time: policy.absent_after_at || "08:00"
+        })
+        .eq("id", rules.id);
+      error = updateError;
+    }
+
+    // Save policy
+    if (!error) {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: profile } = await supabase.from("profiles").select("school_id, id, role").eq("id", user?.id).single();
+      
+      let schoolId = profile?.school_id;
+      if (!schoolId && profile?.role === "admin") {
+        const { data: assignments } = await supabase.from("school_admin_assignments").select("school_id").eq("user_id", profile?.id).limit(1);
+        if (assignments && assignments.length > 0) schoolId = assignments[0].school_id;
+      }
+      if (!schoolId) {
+        const { data: firstSchool } = await supabase.from("schools").select("id").limit(1).single();
+        if (firstSchool) schoolId = firstSchool.id;
+      }
+
+      if (schoolId) {
+        const payload = {
+          ...policy,
+          school_id: schoolId,
+          name: policy.name || "Default School Policy",
+        };
+
+        if (policy.id) {
+          const { error: polErr } = await supabase.from("attendance_policies").update({
+            ...payload, updated_by: profile?.id, updated_at: new Date().toISOString()
+          }).eq("id", policy.id);
+          if (polErr) error = polErr;
+        } else {
+          const { data, error: polErr } = await supabase.from("attendance_policies").insert({
+            ...payload, created_by: profile?.id
+          }).select().single();
+          if (data) setPolicy(data);
+          if (polErr) error = polErr;
+        }
+      }
+    }
+      
+    if (error) setRulesMsg(t.adminRewards.errorSaving);
+    else setRulesMsg(t.adminRewards.successSaving);
+    
+    setSaving(false);
+    setTimeout(() => setRulesMsg(""), 3000);
+  };
+
   const handleSwitchSchool = async (newSchoolId: string) => {
     if (!profile) return;
     setSavingProfile(true);
@@ -197,7 +353,7 @@ export default function AdminSettingsPage() {
  
       {/* Admin Profile Settings */}
       {profile && (
-        <div className="glass rounded-2xl p-5 space-y-6">
+        <div className="glass rounded-2xl p-5 space-y-6 hover:shadow-md hover:-translate-y-1 transition-all duration-300">
           <h2 className="font-semibold flex items-center gap-2 text-primary"><User className="h-4 w-4" /> {t.adminSettings.adminProfile}</h2>
           
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -267,7 +423,7 @@ export default function AdminSettingsPage() {
       )}
 
       {/* ACTIVE SCHOOL SELECTOR */}
-      <div className="glass rounded-2xl p-6 border border-border shadow-sm">
+      <div className="glass rounded-2xl p-6 border border-border shadow-sm hover:shadow-md hover:-translate-y-1 transition-all duration-300">
         <div className="flex items-center gap-3 mb-4">
           <div className="p-2 bg-primary/10 rounded-lg text-primary">
             <ShieldAlert className="h-5 w-5" />
@@ -332,54 +488,200 @@ export default function AdminSettingsPage() {
       )}
 
       {school && (
-        <div className="glass rounded-2xl p-5 space-y-6">
-          <h2 className="font-semibold flex items-center gap-2 text-primary"><MapPin className="h-4 w-4" /> {t.adminSettings.schoolLocation}</h2>
-          
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="space-y-4">
-              <div className="space-y-4">
-                {field(t.adminSettings.schoolName, school.name, (v) => setSchool({ ...school, name: v }))}
-                <div className="grid grid-cols-2 gap-4">
-                  {field(t.adminSettings.latitude, school.latitude, (v) => setSchool({ ...school, latitude: parseFloat(v) || 0 }), "number", "any")}
-                  {field(t.adminSettings.longitude, school.longitude, (v) => setSchool({ ...school, longitude: parseFloat(v) || 0 }), "number", "any")}
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  {field(t.adminSettings.allowedRadius, school.radius_m, (v) => setSchool({ ...school, radius_m: parseInt(v) || 0 }), "number")}
-                  {field("GPS Accuracy Tolerance (m)", school.accuracy_tolerance_m || 100, (v) => setSchool({ ...school, accuracy_tolerance_m: parseInt(v) || 0 }), "number")}
-                </div>
-              </div>
-              
-              <div className="bg-muted p-4 rounded-xl border border-border flex items-start gap-3">
-                <ShieldAlert className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-semibold text-amber-600 dark:text-amber-500">{t.adminSettings.geofencingWarning}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {t.adminSettings.geofencingDesc}
-                  </p>
-                </div>
-              </div>
-            </div>
+        <div className="mt-8">
+          <h2 className="text-lg font-bold flex items-center gap-2 mb-4 text-primary"><Settings className="h-5 w-5" /> School Rules & Policies</h2>
+          <div className="space-y-4">
+            {rules && (
+              <div className="glass rounded-2xl p-5 space-y-4 border border-primary/20 hover:shadow-md hover:-translate-y-1 transition-all duration-300">
+                <h2 className="font-semibold text-primary flex items-center gap-2"><Wallet className="h-4 w-4" /> {t.adminRewards.financialRules}</h2>
+                
+                <div className="space-y-4">
+                  {/* Coins Config */}
+                  <div className="space-y-2">
+                    <h3 className="font-medium text-xs text-amber-600 uppercase tracking-wider">{t.adminRewards.coinsTitle}</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      {field(t.adminRewards.attendancePresent, rules.economy_config?.coins?.attendance_present ?? 20, (v) => setRules({ 
+                        ...rules, 
+                        economy_config: { 
+                          ...rules.economy_config, 
+                          coins: { ...rules.economy_config?.coins, attendance_present: v === "" ? ("" as any) : Number(v) } 
+                        } 
+                      }), "number")}
+                      {field(t.adminRewards.onTimeBonus, rules.economy_config?.coins?.attendance_ontime ?? 10, (v) => setRules({ 
+                        ...rules, 
+                        economy_config: { 
+                          ...rules.economy_config, 
+                          coins: { ...rules.economy_config?.coins, attendance_ontime: v === "" ? ("" as any) : Number(v) } 
+                        } 
+                      }), "number")}
+                    </div>
+                  </div>
 
-            <div className="w-full">
-              <LocationMap 
-                latitude={school.latitude} 
-                longitude={school.longitude} 
-                radius_m={school.radius_m} 
-                onLocationChange={(lat, lng) => setSchool({ ...school, latitude: lat, longitude: lng })}
-              />
-            </div>
+                  {/* Rupiah Config */}
+                  <div className="space-y-2">
+                    <h3 className="font-medium text-xs text-emerald-600 uppercase tracking-wider">{t.adminRewards.rupiahTitle}</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      {field(t.adminRewards.attendancePresentRp, rules.economy_config?.rupiah?.attendance_present ?? 1000, (v) => setRules({ 
+                        ...rules, 
+                        economy_config: { 
+                          ...rules.economy_config, 
+                          rupiah: { ...rules.economy_config?.rupiah, attendance_present: v === "" ? ("" as any) : Number(v) } 
+                        } 
+                      }), "number")}
+                      {field(t.adminRewards.onTimeBonusRp, rules.economy_config?.rupiah?.attendance_ontime ?? 500, (v) => setRules({ 
+                        ...rules, 
+                        economy_config: { 
+                          ...rules.economy_config, 
+                          rupiah: { ...rules.economy_config?.rupiah, attendance_ontime: v === "" ? ("" as any) : Number(v) } 
+                        } 
+                      }), "number")}
+                    </div>
+                  </div>
+
+                  {/* XP Config */}
+                  <div className="space-y-2">
+                    <h3 className="font-medium text-xs text-indigo-600 uppercase tracking-wider">XP Rules</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      {field("Attendance Present XP", rules.economy_config?.xp?.attendance_present ?? 50, (v) => setRules({ 
+                        ...rules, 
+                        economy_config: { 
+                          ...rules.economy_config, 
+                          xp: { ...rules.economy_config?.xp, attendance_present: v === "" ? ("" as any) : Number(v) } 
+                        } 
+                      }), "number")}
+                      {field("On-Time Bonus XP", rules.economy_config?.xp?.attendance_ontime ?? 25, (v) => setRules({ 
+                        ...rules, 
+                        economy_config: { 
+                          ...rules.economy_config, 
+                          xp: { ...rules.economy_config?.xp, attendance_ontime: v === "" ? ("" as any) : Number(v) } 
+                        } 
+                      }), "number")}
+                    </div>
+                  </div>
+
+                  {/* System Values */}
+                <div className="grid grid-cols-2 gap-4 pt-2 border-t">
+                    {field(t.adminRewards.minWithdrawal, rules.min_withdrawal_amount ?? 0, (v) => setRules({ ...rules, min_withdrawal_amount: v === "" ? ("" as any) : Number(v) }), "number")}
+                    {field(t.adminRewards.monthlyHoldPct, rules.monthly_hold_bonus_pct ?? 0, (v) => setRules({ ...rules, monthly_hold_bonus_pct: v === "" ? ("" as any) : Number(v) }), "number")}
+                  </div>
+                </div>
+
+                {policy && (
+                  <>
+                    <h2 className="font-semibold pt-4 text-primary flex items-center gap-2"><Clock className="h-4 w-4" /> Attendance Time Windows</h2>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {field("1. Check-in Opens (Starts Early Bird)", policy.checkin_open_at || "", (v) => setPolicy({ 
+                        ...policy, 
+                        checkin_open_at: v, 
+                        early_start_at: v 
+                      }), "time")}
+                      {field("2. Normal Check-in Starts (Ends Early Bird)", policy.normal_start_at || "", (v) => setPolicy({ 
+                        ...policy, 
+                        early_end_at: v, 
+                        normal_start_at: v 
+                      }), "time")}
+                      {field("3. Late Penalty Starts (Ends Normal)", policy.late_start_at || "", (v) => setPolicy({ 
+                        ...policy, 
+                        normal_end_at: v, 
+                        late_start_at: v 
+                      }), "time")}
+                      {field("4. Check-in Closes (Starts Absent)", policy.absent_after_at || "", (v) => setPolicy({ 
+                        ...policy, 
+                        late_end_at: v, 
+                        absent_after_at: v 
+                      }), "time")}
+                    </div>
+
+                    <h2 className="font-semibold pt-4 text-primary flex items-center gap-2"><Clock className="h-4 w-4" /> Penalty Rules</h2>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {field("Late Grace Minutes", policy.late_grace_minutes ?? 0, (v) => setPolicy({ ...policy, late_grace_minutes: v === "" ? ("" as any) : Number(v) }), "number")}
+                      <div className="col-span-full">
+                        <label className="block text-xs font-medium text-muted-foreground mb-1">Penalty Type</label>
+                        <select 
+                          value={policy.late_penalty_type || "points_deduction"} 
+                          onChange={(e) => setPolicy({ ...policy, late_penalty_type: e.target.value })}
+                          className="w-full px-3 py-2 rounded-xl bg-muted border border-border text-sm focus:outline-none focus:ring-1 focus:ring-primary/50"
+                        >
+                          <option value="points_deduction">Standard Points Deduction (Use value below)</option>
+                          <option value="custom_deduction">Custom Economy Deduction (Rupiah, Coins, XP)</option>
+                          <option value="none">None</option>
+                        </select>
+                      </div>
+                      
+                      {policy.late_penalty_type !== "custom_deduction" && (
+                        field("Late Penalty Value (Legacy/Points)", policy.late_penalty_value ?? 0, (v) => setPolicy({ ...policy, late_penalty_value: v === "" ? ("" as any) : Number(v) }), "number")
+                      )}
+                    </div>
+
+                    {policy.late_penalty_type === "custom_deduction" && (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4 bg-muted/30 p-4 rounded-xl border border-border">
+                        {field("Rupiah Deduction", rules.economy_config?.penalties?.rupiah ?? 0, (v) => setRules({
+                          ...rules,
+                          economy_config: {
+                            ...rules.economy_config,
+                            penalties: { ...rules.economy_config?.penalties, rupiah: v === "" ? ("" as any) : Number(v) }
+                          }
+                        }), "number")}
+                        {field("Coins Deduction", rules.economy_config?.penalties?.coins ?? 0, (v) => setRules({
+                          ...rules,
+                          economy_config: {
+                            ...rules.economy_config,
+                            penalties: { ...rules.economy_config?.penalties, coins: v === "" ? ("" as any) : Number(v) }
+                          }
+                        }), "number")}
+                        {field("XP Deduction", rules.economy_config?.penalties?.xp ?? 0, (v) => setRules({
+                          ...rules,
+                          economy_config: {
+                            ...rules.economy_config,
+                            penalties: { ...rules.economy_config?.penalties, xp: v === "" ? ("" as any) : Number(v) }
+                          }
+                        }), "number")}
+                      </div>
+                    )}
+
+                    <h2 className="font-semibold pt-4 text-primary flex items-center gap-2"><Clock className="h-4 w-4" /> Active School Days</h2>
+                    <div className="space-y-2">
+                      <label className="block text-xs font-medium text-muted-foreground mb-1">Select Active Days (Currently handled in Economy Config)</label>
+                      <div className="flex flex-wrap gap-2">
+                        {[1, 2, 3, 4, 5, 6, 0].map(dayNum => {
+                          const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+                          const activeDays = rules.economy_config?.active_days || [1, 2, 3, 4, 5];
+                          const isActive = activeDays.includes(dayNum);
+                          return (
+                            <button
+                              key={dayNum}
+                              onClick={() => {
+                                const newActive = isActive 
+                                  ? activeDays.filter((d: number) => d !== dayNum)
+                                  : [...activeDays, dayNum];
+                                setRules({
+                                  ...rules,
+                                  economy_config: { ...rules.economy_config, active_days: newActive }
+                                });
+                              }}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${isActive ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}
+                            >
+                              {days[dayNum]}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div className="pt-4 flex items-center justify-between border-t border-border">
+                  <span className={`text-xs font-medium ${rulesMsg.includes("Gagal") || rulesMsg.includes("Error") ? "text-destructive" : "text-emerald-500"}`}>{rulesMsg}</span>
+                  <button onClick={handleSaveSchoolRules} disabled={saving} className="px-5 py-2 rounded-xl bg-primary text-primary-foreground font-semibold text-xs disabled:opacity-50 flex items-center gap-2 hover:bg-primary/90 transition-colors">
+                    {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} {saving ? t.adminRewards.savingStatus : t.adminRewards.saveConfig}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {school && (
-        <div className="flex items-center gap-4 pt-2">
-          <button onClick={handleSave} disabled={saving} className="px-6 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm disabled:opacity-50 flex items-center gap-2 hover:bg-primary/90 transition-colors">
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {saving ? t.adminSettings.saving : t.adminSettings.saveConfig}
-          </button>
-          {msg && <p className={`text-sm font-medium ${msg.includes("Error") ? "text-destructive" : "text-emerald-500"}`}>{msg}</p>}
-        </div>
-      )}
     </div>
   );
 }

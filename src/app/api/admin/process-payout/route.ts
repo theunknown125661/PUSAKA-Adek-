@@ -56,99 +56,49 @@ export async function POST(request: NextRequest) {
       serviceRoleKey
     );
 
-    // Fetch the payout request
-    const { data: payoutReq, error: fetchError } = await adminClient
-      .from("payout_requests")
+    // Fetch the withdrawal request
+    const { data: withdrawalReq, error: fetchError } = await adminClient
+      .from("withdrawal_requests")
       .select("*")
       .eq("id", requestId)
       .single();
 
-    if (fetchError || !payoutReq) {
-      return NextResponse.json({ error: "Payout request not found" }, { status: 404 });
+    if (fetchError || !withdrawalReq) {
+      return NextResponse.json({ error: "Withdrawal request not found" }, { status: 404 });
     }
 
-    if (payoutReq.state !== "REQUESTED") {
-      return NextResponse.json({ error: "Payout request is already processed" }, { status: 400 });
+    if (withdrawalReq.status !== "pending") {
+      return NextResponse.json({ error: "Withdrawal request is already processed" }, { status: 400 });
     }
-
-    const studentId = payoutReq.user_id;
-    const amount = payoutReq.amount;
 
     if (action === "APPROVED") {
-      // Fetch student's RUPIAH wallet
-      const { data: wallet, error: walletError } = await adminClient
-        .from("wallets")
-        .select("*")
-        .eq("user_id", studentId)
-        .eq("currency_type", "RUPIAH")
-        .maybeSingle();
-
-      if (walletError || !wallet) {
-        return NextResponse.json({ error: "Student's Rupiah wallet not found" }, { status: 404 });
-      }
-
-      if (wallet.balance_available < amount) {
-        return NextResponse.json({ error: "Insufficient available balance in student's Rupiah wallet" }, { status: 400 });
-      }
-
-      // Deduct balance from available
-      const { error: updateWalletError } = await adminClient
-        .from("wallets")
-        .update({
-          balance_available: wallet.balance_available - amount,
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", wallet.id);
-
-      if (updateWalletError) {
-        return NextResponse.json({ error: "Failed to update wallet balance: " + updateWalletError.message }, { status: 400 });
-      }
-
-      // Add ledger transaction
-      const { error: txError } = await adminClient
-        .from("wallet_transactions")
-        .insert({
-          wallet_id: wallet.id,
-          user_id: studentId,
-          event_type: "payout",
-          event_id: requestId,
-          amount: -amount, // Negative for debit
-          currency_type: "RUPIAH",
-          state: "PAID",
-          note: `Payout request approved. Destination: ${payoutReq.destination || "cash"}. ${note || ""}`
-        });
-
-      if (txError) {
-        console.error("Warning: Failed to log transaction in ledger:", txError);
-      }
-
-      // Update payout request state
+      // In V2, approval simply marks it as approved. Deduction happens upon QR scan/redemption.
       const { error: updateReqError } = await adminClient
-        .from("payout_requests")
+        .from("withdrawal_requests")
         .update({
-          state: "PAID", // Payout requests table state maps to PAID when fully processed
-          processed_by: adminUser.id,
+          status: "approved",
+          admin_note: note || null,
           processed_at: new Date().toISOString()
         })
         .eq("id", requestId);
 
       if (updateReqError) {
-        return NextResponse.json({ error: "Failed to update payout request status: " + updateReqError.message }, { status: 400 });
+        return NextResponse.json({ error: "Failed to update withdrawal request status: " + updateReqError.message }, { status: 400 });
       }
 
     } else {
-      // Rejection: Just update payout request state to REJECTED
+      // Rejection
       const { error: updateReqError } = await adminClient
-        .from("payout_requests")
+        .from("withdrawal_requests")
         .update({
-          state: "REJECTED",
-          processed_by: adminUser.id,
+          status: "rejected",
+          admin_note: note || null,
           processed_at: new Date().toISOString()
         })
         .eq("id", requestId);
 
       if (updateReqError) {
-        return NextResponse.json({ error: "Failed to update payout request status: " + updateReqError.message }, { status: 400 });
+        return NextResponse.json({ error: "Failed to update withdrawal request status: " + updateReqError.message }, { status: 400 });
       }
     }
 
@@ -159,3 +109,4 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
+

@@ -10,6 +10,8 @@ import { toast } from "sonner";
 export default function AdminQuestsPage() {
   const { t, interpolate, isClient } = useTranslation();
   const [quests, setQuests] = useState<Quest[]>([]);
+  const [schools, setSchools] = useState<{id: string, name: string}[]>([]);
+  const [classes, setClasses] = useState<{id: string, name: string, school_id: string}[]>([]);
   const [loading, setLoading] = useState(true);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -25,6 +27,8 @@ export default function AdminQuestsPage() {
     reward_coins: 0,
     requirement_type: "checkin_count",
     requirement_value: 1,
+    school_id: "" as string | null,
+    class_id: "" as string | null,
     active: true
   });
 
@@ -34,13 +38,17 @@ export default function AdminQuestsPage() {
 
   async function fetchQuests() {
     const supabase = createClient();
-    const { data } = await supabase
-      .from("quests")
-      .select("*")
-      .order("type")
-      .order("created_at");
     
-    if (data) setQuests(data as Quest[]);
+    const [questsRes, schoolsRes, classesRes] = await Promise.all([
+      supabase.from("quests").select("*").order("type").order("created_at"),
+      supabase.from("schools").select("id, name").order("name"),
+      supabase.from("classes").select("id, name, school_id").order("name")
+    ]);
+    
+    if (questsRes.data) setQuests(questsRes.data as Quest[]);
+    if (schoolsRes.data) setSchools(schoolsRes.data);
+    if (classesRes.data) setClasses(classesRes.data);
+    
     setLoading(false);
   }
 
@@ -55,6 +63,8 @@ export default function AdminQuestsPage() {
         reward_coins: quest.reward_coins,
         requirement_type: quest.requirement_type,
         requirement_value: quest.requirement_value,
+        school_id: quest.school_id || "",
+        class_id: quest.class_id || "",
         active: quest.active
       });
     } else {
@@ -67,6 +77,8 @@ export default function AdminQuestsPage() {
         reward_coins: 0,
         requirement_type: "checkin_count",
         requirement_value: 1,
+        school_id: "",
+        class_id: "",
         active: true
       });
     }
@@ -90,6 +102,8 @@ export default function AdminQuestsPage() {
       reward_coins: formData.reward_coins,
       requirement_type: formData.requirement_type,
       requirement_value: formData.requirement_value,
+      school_id: formData.school_id || null,
+      class_id: formData.class_id || null,
       active: formData.active
     };
 
@@ -151,13 +165,28 @@ export default function AdminQuestsPage() {
         {quests.map((quest) => (
           <div key={quest.id} className={`card rounded-2xl p-5 border-2 transition-all ${!quest.active ? 'opacity-60 border-transparent' : 'border-transparent'}`}>
             <div className="flex justify-between items-start mb-3">
-              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                quest.type === 'daily' ? 'bg-blue-500/10 text-blue-500' :
-                quest.type === 'weekly' ? 'bg-purple-500/10 text-purple-500' :
-                'bg-amber-500/10 text-amber-500'
-              }`}>
-                {quest.type === 'daily' ? t.adminQuests.daily : quest.type === 'weekly' ? t.adminQuests.weekly : t.adminQuests.special}
-              </span>
+              <div className="flex flex-wrap gap-1">
+                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                  quest.type === 'daily' ? 'bg-blue-500/10 text-blue-500' :
+                  quest.type === 'weekly' ? 'bg-purple-500/10 text-purple-500' :
+                  'bg-amber-500/10 text-amber-500'
+                }`}>
+                  {quest.type === 'daily' ? t.adminQuests.daily : quest.type === 'weekly' ? t.adminQuests.weekly : t.adminQuests.special}
+                </span>
+                {!quest.school_id && !quest.class_id ? (
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-500">
+                    Global
+                  </span>
+                ) : quest.school_id && !quest.class_id ? (
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500">
+                    School
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500">
+                    Class
+                  </span>
+                )}
+              </div>
               <div className="flex gap-2">
                 <button onClick={() => openModal(quest)} className="p-1.5 hover:bg-muted rounded-full transition-colors text-muted-foreground hover:text-foreground">
                   <Edit2 className="h-3.5 w-3.5" />
@@ -236,6 +265,36 @@ export default function AdminQuestsPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
+                  <label className="text-sm font-medium mb-1 block">Scope: School</label>
+                  <select 
+                    className="input w-full" 
+                    value={formData.school_id || ""} 
+                    onChange={(e) => setFormData({ ...formData, school_id: e.target.value, class_id: "" })}
+                  >
+                    <option value="">Global (All Schools)</option>
+                    {schools.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1 block">Scope: Class</label>
+                  <select 
+                    className="input w-full" 
+                    value={formData.class_id || ""} 
+                    onChange={(e) => setFormData({ ...formData, class_id: e.target.value })}
+                    disabled={!formData.school_id}
+                  >
+                    <option value="">All Classes in School</option>
+                    {classes.filter(c => c.school_id === formData.school_id).map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
                   <label className="text-sm font-medium mb-1 block">{t.adminQuests.typeLabel}</label>
                   <select 
                     className="input w-full" 
@@ -270,7 +329,7 @@ export default function AdminQuestsPage() {
                     type="number" 
                     className="input w-full" 
                     value={formData.reward_xp} 
-                    onChange={(e) => setFormData({ ...formData, reward_xp: parseInt(e.target.value) || 0 })}
+                    onChange={(e) => setFormData({ ...formData, reward_xp: e.target.value === '' ? ('' as any) : (parseInt(e.target.value) || 0) })}
                   />
                 </div>
                 <div>
@@ -279,7 +338,7 @@ export default function AdminQuestsPage() {
                     type="number" 
                     className="input w-full" 
                     value={formData.reward_coins} 
-                    onChange={(e) => setFormData({ ...formData, reward_coins: parseInt(e.target.value) || 0 })}
+                    onChange={(e) => setFormData({ ...formData, reward_coins: e.target.value === '' ? ('' as any) : (parseInt(e.target.value) || 0) })}
                   />
                 </div>
               </div>
@@ -305,7 +364,7 @@ export default function AdminQuestsPage() {
                       type="number" 
                       className="input w-full" 
                       value={formData.requirement_value} 
-                      onChange={(e) => setFormData({ ...formData, requirement_value: parseInt(e.target.value) || 1 })}
+                      onChange={(e) => setFormData({ ...formData, requirement_value: e.target.value === '' ? ('' as any) : (parseInt(e.target.value) || 0) })}
                     />
                   </div>
                 </div>

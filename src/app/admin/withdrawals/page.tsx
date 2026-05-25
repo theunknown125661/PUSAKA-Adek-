@@ -5,26 +5,27 @@ import { createClient } from "@/lib/supabase/client";
 import { useTranslation } from "@/lib/i18n/use-translation";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
-import { Wallet, CheckCircle, XCircle, Loader2, History, Clock } from "lucide-react";
+import { Wallet, CheckCircle, XCircle, Loader2, History, Clock, QrCode } from "lucide-react";
 import { toast } from "sonner";
+import { RedeemTab } from "./redeem-tab";
 
 interface PayoutRequestItem {
   id: string;
-  user_id: string;
+  student_id: string;
   amount: number;
-  destination: string;
-  state: string;
-  created_at: string;
+  status: string;
+  requested_at: string;
   full_name: string;
   email: string;
-  available_balance: number;
+  balance_available: number;
   processed_by_name?: string;
   processed_at?: string;
+  redeemed_at?: string;
 }
 
 export default function WithdrawalReviewPage() {
   const { t, interpolate, isClient } = useTranslation();
-  const [activeTab, setActiveTab] = useState<"pending" | "history">("pending");
+  const [activeTab, setActiveTab] = useState<"pending" | "history" | "redeem">("pending");
   const [requests, setRequests] = useState<PayoutRequestItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -35,31 +36,32 @@ export default function WithdrawalReviewPage() {
   }, [activeTab]);
 
   async function fetchRequests() {
+    if (activeTab === "redeem") return;
     setLoading(true);
     try {
       const supabase = createClient();
       const { data, error } = await supabase
-        .from("payout_requests")
+        .from("withdrawal_requests")
         .select(`
           id,
-          user_id,
+          student_id,
           amount,
-          destination,
-          state,
-          created_at,
+          status,
+          requested_at,
           processed_at,
-          processed_by_profile:profiles!processed_by(full_name),
-          profiles:profiles!user_id (
+          redeemed_at,
+          profiles!student_id (
             full_name,
             email,
             wallets (
               balance_available,
               currency_type
             )
-          )
+          ),
+          redeemer:profiles!redeemed_by(full_name)
         `)
-        .in("state", activeTab === "pending" ? ["REQUESTED"] : ["APPROVED", "PAID", "REJECTED"])
-        .order("created_at", { ascending: activeTab === "pending" });
+        .in("status", activeTab === "pending" ? ["pending"] : ["approved", "token_issued", "redeemed", "rejected", "expired", "cancelled"])
+        .order("requested_at", { ascending: activeTab === "pending" });
 
       if (error) {
         toast.error("Failed to load requests: " + error.message);
@@ -67,19 +69,21 @@ export default function WithdrawalReviewPage() {
       }
 
       const formatted: PayoutRequestItem[] = (data || []).map((req: any) => {
-        const rupiahWallet = req.profiles?.wallets?.find((w: any) => w.currency_type === "RUPIAH");
+        // wallets is an array since one profile could have many, but here we expect the single rupiah one which is returned?
+        // Wait, in schema.sql: wallets has 'student_id' UNIQUE. So it's a one-to-one or one-to-many.
+        const wallet = Array.isArray(req.profiles?.wallets) ? req.profiles.wallets.find((w: any) => w.currency_type === 'RUPIAH') || req.profiles.wallets[0] : req.profiles?.wallets;
         return {
           id: req.id,
-          user_id: req.user_id,
+          student_id: req.student_id,
           amount: req.amount,
-          destination: req.destination,
-          state: req.state,
-          created_at: req.created_at,
+          status: req.status,
+          requested_at: req.requested_at,
           full_name: req.profiles?.full_name || "Unknown Student",
           email: req.profiles?.email || "",
-          available_balance: rupiahWallet ? rupiahWallet.balance_available : 0,
-          processed_by_name: req.processed_by_profile?.full_name,
-          processed_at: req.processed_at
+          balance_available: wallet ? wallet.balance_available : 0,
+          processed_by_name: req.redeemer?.full_name || null,
+          processed_at: req.processed_at,
+          redeemed_at: req.redeemed_at
         };
       });
 
@@ -123,7 +127,7 @@ export default function WithdrawalReviewPage() {
   if (!isClient) return null;
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-4xl pb-12">
+    <div className={`space-y-6 animate-fade-in pb-12 ${activeTab === 'redeem' ? 'max-w-7xl mx-auto' : 'max-w-4xl'}`}>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold flex items-center gap-2">
@@ -132,7 +136,9 @@ export default function WithdrawalReviewPage() {
           <p className="text-muted-foreground text-sm mt-1">
             {activeTab === "pending" 
               ? interpolate(t.adminWithdrawals?.pendingRequests || "Pending requests: {count}", { count: requests.length })
-              : `Total processed requests: ${requests.length}`
+              : activeTab === "history" 
+              ? `Total processed requests: ${requests.length}`
+              : "Scan QR or enter token to validate payout."
             }
           </p>
         </div>
@@ -150,6 +156,16 @@ export default function WithdrawalReviewPage() {
             <Clock className="h-3.5 w-3.5" /> Pending
           </button>
           <button
+            onClick={() => setActiveTab("redeem")}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 active:scale-[0.98] ${
+              activeTab === "redeem"
+                ? "bg-background text-foreground shadow-md shadow-black/5"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <QrCode className="h-3.5 w-3.5" /> Redeem
+          </button>
+          <button
             onClick={() => setActiveTab("history")}
             className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 active:scale-[0.98] ${
               activeTab === "history"
@@ -162,7 +178,9 @@ export default function WithdrawalReviewPage() {
         </div>
       </div>
 
-      {loading ? (
+      {activeTab === "redeem" ? (
+        <RedeemTab />
+      ) : loading ? (
         <div className="flex items-center justify-center py-20">
           <div className="h-8 w-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
         </div>
@@ -180,21 +198,20 @@ export default function WithdrawalReviewPage() {
                 <div>
                   <p className="font-semibold text-sm">{req.full_name}</p>
                   <p className="text-xs text-muted-foreground">{req.email}</p>
-                  <p className="text-[10px] text-muted-foreground mt-1">Requested: {formatDate(req.created_at)}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">Requested: {formatDate(req.requested_at)}</p>
                 </div>
                 <div className="text-right flex flex-col items-end gap-1.5">
                   <p className="text-lg font-black text-primary">{formatCurrency(req.amount)}</p>
                   <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] font-bold bg-primary/10 text-primary px-2 py-0.5 rounded-md uppercase tracking-wider">
-                      {req.destination}
-                    </span>
                     {activeTab === "history" && (
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${
-                        req.state === "REJECTED" 
+                        req.status === "rejected" || req.status === "expired" || req.status === "cancelled"
                           ? "bg-red-500/10 text-red-500" 
+                          : req.status === "approved" || req.status === "token_issued"
+                          ? "bg-blue-500/10 text-blue-500"
                           : "bg-emerald-500/10 text-emerald-500"
                       }`}>
-                        {req.state}
+                        {req.status}
                       </span>
                     )}
                   </div>
@@ -205,7 +222,7 @@ export default function WithdrawalReviewPage() {
                 <>
                   <div className="text-xs font-semibold text-muted-foreground bg-muted/40 p-2.5 rounded-xl border border-border/40 flex justify-between items-center">
                     <span>{t.adminWithdrawals?.availableBalance || "Student Wallet Balance"}</span>
-                    <span className="text-emerald-500 font-bold">{formatCurrency(req.available_balance)}</span>
+                    <span className="text-emerald-500 font-bold">{formatCurrency(req.balance_available)}</span>
                   </div>
 
                   <div className="flex gap-3 items-end pt-1">
@@ -237,8 +254,9 @@ export default function WithdrawalReviewPage() {
                 </>
               ) : (
                 <div className="text-[10px] text-muted-foreground bg-muted/20 px-3 py-2 rounded-xl flex flex-wrap justify-between items-center gap-2 border border-border/30">
-                  <span>Processed By: <strong className="text-foreground">{req.processed_by_name || "System"}</strong></span>
-                  {req.processed_at && <span>Processed At: <strong className="text-foreground">{formatDate(req.processed_at)}</strong></span>}
+                  {req.processed_by_name && <span>Redeemed By: <strong className="text-foreground">{req.processed_by_name}</strong></span>}
+                  {req.redeemed_at && <span>Redeemed At: <strong className="text-foreground">{formatDate(req.redeemed_at)}</strong></span>}
+                  {(!req.redeemed_at && req.processed_at) && <span>Approved At: <strong className="text-foreground">{formatDate(req.processed_at)}</strong></span>}
                 </div>
               )}
             </div>

@@ -10,8 +10,10 @@ import { useTranslation } from "@/lib/i18n/use-translation";
 import { haversineDistance } from "@/lib/utils/haversine";
 import { formatDistance, formatAccuracy, formatCurrency, toLocalYYYYMMDD } from "@/lib/utils/format";
 import { detectFraudFlags } from "@/lib/utils/fraud-flags";
+import { classifyCheckin, type AttendancePolicy, type CheckinClassification } from "@/lib/utils/attendance-engine";
+import { useCheckinState } from "@/lib/hooks/use-checkin-state";
 
-import { MapPin, Camera, Clock, Gift, RefreshCw, Send, CheckCircle2, GraduationCap, ChevronRight, ChevronLeft, ShieldAlert, Sparkles, Award } from "lucide-react";
+import { MapPin, Camera, Clock, Gift, RefreshCw, Send, CheckCircle2, GraduationCap, ChevronRight, ChevronLeft, ShieldAlert, Sparkles, Award, Calendar as CalendarIcon, AlertTriangle } from "lucide-react";
 import { StatefulButton, type ButtonState } from "@/components/ui/stateful-button";
 import { RequirementItem, type RequirementStatus } from "@/components/ui/requirement-item";
 import { ValidationSummary, type ValidationError } from "@/components/ui/validation-summary";
@@ -29,8 +31,7 @@ export default function CheckInPage() {
   const router = useRouter();
 
   const [school, setSchool] = useState<{ latitude: number; longitude: number; radius_m: number; accuracy_tolerance_m?: number } | null>(null);
-  const [enrollment, setEnrollment] = useState<{ class_id: string; school_id: string } | null>(null);
-  const [rewardRules, setRewardRules] = useState<{ attendance_start_time: string; attendance_end_time: string; early_cutoff_time: string; base_reward: number; early_bonus: number } | null>(null);
+  const [classification, setClassification] = useState<CheckinClassification | null>(null);
   
   const [distance, setDistance] = useState<number | null>(null);
   const [withinRadius, setWithinRadius] = useState(false);
@@ -40,32 +41,27 @@ export default function CheckInPage() {
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
   const [noEnrollment, setNoEnrollment] = useState(false);
 
+  const checkinState = useCheckinState(profile?.id);
+  const { enrollment, rewardRules, activePolicy, isHoliday, holidayConfig, isWeekend, canCheckIn, status: arrivalStatus } = checkinState;
+
   // Stepper state
   const [step, setStep] = useState(1);
 
   useEffect(() => {
-    if (!profile) return;
+    if (!profile || !enrollment) return;
     const supabase = createClient();
     async function loadMeta() {
-      const { data: enr } = await supabase.from("enrollments").select("class_id, classes(school_id)").eq("student_id", profile!.id).limit(1).maybeSingle();
-      if (!enr) {
-        setNoEnrollment(true);
-        return;
-      }
-      const schoolId = (enr.classes as unknown as { school_id: string })?.school_id;
-      setEnrollment({ class_id: enr.class_id, school_id: schoolId });
+      const schoolId = enrollment!.school_id;
 
-      const [schoolRes, rulesRes, todayRes] = await Promise.all([
+      const [schoolRes, todayRes] = await Promise.all([
         supabase.from("schools").select("latitude, longitude, radius_m, accuracy_tolerance_m").eq("id", schoolId).single(),
-        supabase.from("reward_rules").select("*").eq("school_id", schoolId).single(),
         supabase.from("attendance_logs").select("id").eq("student_id", profile!.id).eq("attendance_date", toLocalYYYYMMDD()).limit(1),
       ]);
       if (schoolRes.data) setSchool(schoolRes.data);
-      if (rulesRes.data) setRewardRules(rulesRes.data as any);
       if (todayRes.data && todayRes.data.length > 0) setAlreadySubmitted(true);
     }
     loadMeta();
-  }, [profile]);
+  }, [profile, enrollment]);
 
   useEffect(() => {
     // Auto request position if we don't have it yet
@@ -93,19 +89,9 @@ export default function CheckInPage() {
     }
   }, [position, school]);
 
-  const isInTimeWindow = () => {
-    if (!rewardRules) return true;
-    const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-    return timeStr >= rewardRules.attendance_start_time && timeStr <= rewardRules.attendance_end_time;
-  };
+  const isInTimeWindow = () => canCheckIn;
 
-  const isBeforeEarlyCutoff = () => {
-    if (!rewardRules) return false;
-    const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-    return timeStr <= rewardRules.early_cutoff_time;
-  };
+  const isBeforeEarlyCutoff = () => arrivalStatus === "early";
 
   const getRadiusStatus = (): RequirementStatus => {
     if (geoError) return "blocked";
@@ -170,6 +156,10 @@ export default function CheckInPage() {
       }
 
       const { data: urlData } = supabase.storage.from("attendance-selfies").getPublicUrl(fileName);
+      
+      const finalClassification = activePolicy ? classifyCheckin(new Date(), activePolicy) : null;
+      if (finalClassification) setClassification(finalClassification);
+
       const flags = detectFraudFlags({
         distanceM: distance || 0,
         radiusM: school?.radius_m || 200,
@@ -195,6 +185,12 @@ export default function CheckInPage() {
         before_early_cutoff: isBeforeEarlyCutoff(),
         proof_image_url: urlData.publicUrl,
         status: "pending_teacher_view",
+        arrival_status: finalClassification?.status === "invalid" ? null : finalClassification?.status,
+        policy_id: activePolicy?.id || null,
+        minutes_delta_from_start: finalClassification?.minutes_delta_from_start || null,
+        penalty_applied: finalClassification?.penalty_applied || false,
+        penalty_type: finalClassification?.penalty_type || null,
+        penalty_value: finalClassification?.penalty_value || null,
         fraud_flags: flags.length > 0 ? flags : null,
         device_info: navigator.userAgent.substring(0, 200),
       });
@@ -206,6 +202,21 @@ export default function CheckInPage() {
       // Check off quests progress asynchronously on database side
       setSubmitState("success");
       toast.success(t.checkin.submit.success);
+
+      // Notify admins about the new check-in
+      fetch("/api/notify-admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "pending_reviews",
+          category: "transactional",
+          priority: "low",
+          title: "New Check-in Submitted",
+          message: `${profile.full_name || "A student"} submitted a new check-in for class.`,
+          action_url: "/admin/attendance",
+        }),
+      }).catch(err => console.error("Failed to send admin notification:", err));
+
       close();
     } catch (err: any) {
       setSubmitState("idle");
@@ -215,7 +226,111 @@ export default function CheckInPage() {
 
   if (!isClient) return null;
 
-  if (noEnrollment) {
+  if (isWeekend) {
+    return (
+      <div className="animate-fade-in flex flex-col items-center justify-center text-center py-20 px-6 max-w-lg mx-auto space-y-6">
+        <div className="relative">
+          <span 
+            className="absolute inset-0 blur-2xl rounded-full scale-150 animate-pulse opacity-25 bg-slate-500" 
+          />
+          <div 
+            className="h-24 w-24 rounded-full flex items-center justify-center relative shadow-lg text-white mx-auto bg-slate-500 shadow-slate-500/40"
+          >
+            <CalendarIcon className="h-12 w-12" />
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <span 
+            className="text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border shadow-sm bg-slate-500/10 border-slate-500/30 text-slate-500"
+          >
+            Weekend / Rest Day
+          </span>
+          <h1 className="text-3xl font-black tracking-tight text-foreground">No School Today</h1>
+          <p className="text-muted-foreground text-sm leading-relaxed max-w-sm mx-auto">
+            Today is a scheduled rest day. The check-in window is closed, and your streak is protected and will not break!
+          </p>
+        </div>
+
+        <div className="w-full bg-card border border-border/40 p-5 rounded-[28px] text-center space-y-2.5">
+          <div className="flex items-center justify-center gap-1.5">
+            <Sparkles className="h-4.5 w-4.5 animate-spin duration-3000 text-slate-500" />
+            <span className="text-xs uppercase tracking-wider font-extrabold text-muted-foreground">Streak Safeguarded</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            No check-in is required today. Enjoy your day off!
+          </p>
+        </div>
+
+        <button 
+          onClick={() => router.push("/student")}
+          className="btn btn-primary w-full py-4 rounded-2xl font-bold text-sm shadow-md"
+        >
+          {t.checkin.submit.backToDashboard}
+        </button>
+      </div>
+    );
+  }
+
+  if (holidayConfig) {
+    return (
+      <div className="animate-fade-in flex flex-col items-center justify-center text-center py-20 px-6 max-w-lg mx-auto space-y-6">
+        <div className="relative">
+          <span 
+            className="absolute inset-0 blur-2xl rounded-full scale-150 animate-pulse opacity-25" 
+            style={{ backgroundColor: holidayConfig.color_hex || "#6366f1" }}
+          />
+          <div 
+            className="h-24 w-24 rounded-full flex items-center justify-center relative shadow-lg text-white mx-auto"
+            style={{ 
+              backgroundColor: holidayConfig.color_hex || "#6366f1",
+              boxShadow: `0 10px 25px -5px ${holidayConfig.color_hex || "#6366f1"}40`
+            }}
+          >
+            <CalendarIcon className="h-12 w-12" />
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <span 
+            className="text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border shadow-sm"
+            style={{ 
+              backgroundColor: `${holidayConfig.color_hex || "#6366f1"}10`,
+              borderColor: `${holidayConfig.color_hex || "#6366f1"}30`,
+              color: holidayConfig.color_hex || "#6366f1"
+            }}
+          >
+            School Closed
+          </span>
+          <h1 className="text-3xl font-black tracking-tight text-foreground">{holidayConfig.name}</h1>
+          <p className="text-muted-foreground text-sm leading-relaxed max-w-sm mx-auto">
+            {holidayConfig.description || "School is closed today in celebration of this holiday. Your attendance streak is protected and will not break!"}
+          </p>
+        </div>
+
+        <div className="w-full bg-card border border-border/40 p-5 rounded-[28px] text-center space-y-2.5">
+          <div className="flex items-center justify-center gap-1.5">
+            <Sparkles className="h-4.5 w-4.5 animate-spin duration-3000 text-amber-500" />
+            <span className="text-xs uppercase tracking-wider font-extrabold text-muted-foreground">Streak Safeguarded</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            No check-in is required today. Enjoy your day off!
+          </p>
+        </div>
+
+        <button 
+          onClick={() => router.push("/student")}
+          className="btn btn-primary w-full py-4 rounded-2xl font-bold text-sm shadow-md"
+        >
+          {t.checkin.submit.backToDashboard}
+        </button>
+      </div>
+    );
+  }
+
+  if (checkinState.loading) return null;
+
+  if (!enrollment && !checkinState.loading) {
     return (
       <div className="animate-fade-in flex flex-col items-center justify-center text-center py-20 px-4 max-w-md mx-auto">
         <div className="h-20 w-20 rounded-full bg-amber-500/10 flex items-center justify-center mb-6 ring-8 ring-amber-500/5">
@@ -254,22 +369,46 @@ export default function CheckInPage() {
   if (submitState === "success") {
     // Confetti success rewards view
     const isEarly = isBeforeEarlyCutoff();
-    const baseVal = rewardRules?.base_reward || 5000;
-    const bonusVal = rewardRules?.early_bonus || 2000;
+    const baseVal = rewardRules?.economy_config?.rupiah?.attendance_present ?? rewardRules?.base_reward ?? 1000;
+    const bonusVal = rewardRules?.economy_config?.rupiah?.attendance_ontime ?? rewardRules?.early_bonus ?? 500;
     const totalAward = baseVal + (isEarly ? bonusVal : 0);
+    
+    const baseCoins = rewardRules?.economy_config?.coins?.attendance_present ?? 20;
+    const bonusCoins = rewardRules?.economy_config?.coins?.attendance_ontime ?? 10;
+    const totalCoins = baseCoins + (isEarly ? bonusCoins : 0);
+
+    const baseXp = rewardRules?.economy_config?.xp?.attendance_present ?? 50;
+    const bonusXp = rewardRules?.economy_config?.xp?.attendance_ontime ?? 25;
+    const totalXp = baseXp + (isEarly ? bonusXp : 0);
 
     return (
       <div className="animate-fade-in flex flex-col items-center justify-center text-center py-12 px-5 max-w-md mx-auto space-y-6">
         <div className="relative">
-          <span className="absolute inset-0 bg-success/20 blur-xl rounded-full scale-150 animate-pulse" />
-          <div className="h-24 w-24 rounded-full bg-emerald-500 text-white flex items-center justify-center relative shadow-lg shadow-emerald-500/20">
-            <CheckCircle2 className="h-12 w-12" />
+          <span className={`absolute inset-0 blur-xl rounded-full scale-150 animate-pulse ${
+            classification?.status === 'late' ? 'bg-amber-500/20' : 'bg-success/20'
+          }`} />
+          <div className={`h-24 w-24 rounded-full text-white flex items-center justify-center relative shadow-lg ${
+            classification?.status === 'late' ? 'bg-amber-500 shadow-amber-500/20' : 'bg-emerald-500 shadow-emerald-500/20'
+          }`}>
+            {classification?.status === 'late' ? <AlertTriangle className="h-12 w-12" /> : <CheckCircle2 className="h-12 w-12" />}
           </div>
         </div>
 
         <div className="space-y-2">
-          <h1 className="text-3xl font-black tracking-tight">{t.checkin.submit.success}</h1>
-          <p className="text-muted-foreground text-sm leading-relaxed px-4">{t.checkin.submit.successDesc}</p>
+          <h1 className="text-3xl font-black tracking-tight">{
+            classification?.status === 'late' ? 'Checked in Late' :
+            classification?.status === 'early' ? 'Checked in Early!' :
+            'Checked in On Time'
+          }</h1>
+          <p className="text-muted-foreground text-sm leading-relaxed px-4">
+            {classification?.status === 'late' && classification.penalty_applied
+              ? classification.penalty_type === 'custom_deduction'
+                ? `Penalty applied: -${rewardRules?.economy_config?.penalties?.rupiah || 0} Rupiah, -${rewardRules?.economy_config?.penalties?.coins || 0} Coins, -${rewardRules?.economy_config?.penalties?.xp || 0} XP.`
+                : `Penalty applied: -${classification.penalty_value} ${classification.penalty_type?.replace('_', ' ')}.`
+              : classification?.status === 'late'
+              ? 'You missed the normal window, but no penalty was applied.'
+              : t.checkin.submit.successDesc}
+          </p>
         </div>
 
         {/* Celebration reward summary banner */}
@@ -282,13 +421,13 @@ export default function CheckInPage() {
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-card border border-border/40 p-4 rounded-2xl flex flex-col items-center">
               <div className="h-8 w-8 rounded-full bg-gradient-to-br from-amber-300 to-amber-500 flex items-center justify-center text-white font-bold text-xs shadow-sm mb-1.5">$</div>
-              <span className="text-lg font-black text-amber-500">+20 Coins</span>
+              <span className="text-lg font-black text-amber-500">+{totalCoins} Coins</span>
             </div>
             <div className="bg-card border border-border/40 p-4 rounded-2xl flex flex-col items-center">
               <div className="h-8 w-8 rounded-2xl bg-indigo-500/10 flex items-center justify-center text-indigo-500 mb-1.5">
                 <Award className="h-4.5 w-4.5" />
               </div>
-              <span className="text-lg font-black text-indigo-500">+50 XP</span>
+              <span className="text-lg font-black text-indigo-500">+{totalXp} XP</span>
             </div>
           </div>
 
@@ -586,7 +725,9 @@ export default function CheckInPage() {
                 )}
                 <div className="flex justify-between border-t border-emerald-500/20 pt-1.5 mt-1.5 text-emerald-600 dark:text-emerald-400 font-extrabold">
                   <span>Submitting gives:</span>
-                  <span>+20 Coins & +50 XP</span>
+                  <span>
+                    +{rewardRules?.economy_config?.coins?.attendance_present ?? 20} Coins & +{rewardRules?.economy_config?.xp?.attendance_present ?? 50} XP
+                  </span>
                 </div>
               </div>
             )}

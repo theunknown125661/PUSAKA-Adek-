@@ -12,6 +12,8 @@ import AvatarUpload from "@/components/profile/avatar-upload";
 import BioEditor, { containsProfanity } from "@/components/profile/bio-editor";
 import type { Cosmetic } from "@/lib/types/database";
 import { toast } from "sonner";
+import { XPProgressBar } from "@/components/shared/xp-progress-bar";
+import { calculateLevelAndProgress } from "@/lib/utils/gamification";
 
 export default function StudentSettingsPage() {
   const { t, isClient } = useTranslation();
@@ -72,20 +74,25 @@ export default function StudentSettingsPage() {
           .eq("student_id", user.id)
           .maybeSingle();
 
-        if (data) {
-          setProfile({
-            ...data,
-            class_name: (enr?.classes as any)?.name,
-            school_name: ((enr?.classes as any)?.schools as any)?.name
-          });
+        // Fetch rules for economy_config
+        const { data: rules } = await supabase
+          .from("reward_rules")
+          .select("economy_config")
+          .eq("school_id", (enr?.classes as any)?.school_id)
+          .maybeSingle();
+
+        setProfile({
+          ...data,
+          class_name: (enr?.classes as any)?.name,
+          school_name: ((enr?.classes as any)?.schools as any)?.name,
+          economy_config: rules?.economy_config
+        });
           setFullName(data.full_name || "");
           setUsername(data.username || "");
           setBio(data.bio || "");
           setAvatarMode(data.avatar_mode || "initials");
           setAvatarUrl(data.avatar_url || null);
           setSelectedThemeId(data.theme_id || null);
-        }
-
         // Load available themes
         const { data: cosmetics } = await supabase
           .from("cosmetics")
@@ -322,11 +329,7 @@ export default function StudentSettingsPage() {
     );
   }
 
-  // Calculate level progress
-  const xpCurrent = profile?.xp || 0;
-  const currentLevel = profile?.level || 1;
-  const xpNeeded = currentLevel * 100;
-  const progressPercent = Math.min(100, (xpCurrent / xpNeeded) * 100);
+  const { level: currentLevel } = calculateLevelAndProgress(profile?.xp || 0, profile?.economy_config);
 
   const field = (id: string, label: string, value: string, onChange: (v: string) => void, opts?: { placeholder?: string; maxLength?: number; disabled?: boolean }) => (
     <div>
@@ -408,17 +411,12 @@ export default function StudentSettingsPage() {
         </div>
 
         {/* XP Progress Bar */}
-        <div className="mt-4 space-y-1.5">
-          <div className="flex justify-between text-xs font-medium">
-            <span>Progress to Level {currentLevel + 1}</span>
-            <span>{xpCurrent} / {xpNeeded} XP</span>
-          </div>
-          <div className="w-full h-2.5 bg-muted rounded-full overflow-hidden">
-            <div
-              className="h-full bg-primary transition-all duration-500"
-              style={{ width: `${progressPercent}%` }}
-            />
-          </div>
+        <div className="mt-4">
+          <XPProgressBar 
+            xp={profile?.xp || 0} 
+            economyConfig={profile?.economy_config} 
+            userLevel={profile?.level} 
+          />
         </div>
       </div>
 

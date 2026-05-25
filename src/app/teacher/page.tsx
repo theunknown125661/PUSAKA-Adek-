@@ -7,6 +7,7 @@ import { useUserRole } from "@/lib/hooks/use-user-role";
 import { useTranslation } from "@/lib/i18n/use-translation";
 import { EmptyState } from "@/components/shared/empty-state";
 import { BookOpen, Users, AlertTriangle, CheckCircle, Clock, ChevronRight, GraduationCap } from "lucide-react";
+import { toLocalYYYYMMDD } from "@/lib/utils/format";
 
 interface ClassSummary {
   id: string;
@@ -27,7 +28,7 @@ export default function TeacherDashboard() {
   useEffect(() => {
     if (!profile) return;
     const supabase = createClient();
-    const today = new Date().toISOString().split("T")[0];
+    const today = toLocalYYYYMMDD(new Date());
 
     async function load() {
       const { data: assignments } = await supabase

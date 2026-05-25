@@ -7,8 +7,9 @@ import { createClient } from "@/lib/supabase/client";
 import { useUserRole } from "@/lib/hooks/use-user-role";
 import { useTranslation } from "@/lib/i18n/use-translation";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { ArrivalBadge } from "@/components/shared/arrival-badge";
 import { EmptyState } from "@/components/shared/empty-state";
-import { formatTime, formatDistance } from "@/lib/utils/format";
+import { formatTime, formatDistance, toLocalYYYYMMDD } from "@/lib/utils/format";
 import { Users, Clock, AlertTriangle, ChevronLeft, MapPin, X, Check, Flag } from "lucide-react";
 import { type ButtonState } from "@/components/ui/stateful-button";
 import { toast } from "sonner";
@@ -36,7 +37,7 @@ export default function ClassDetailPage() {
   useEffect(() => {
     if (!profile || !id) return;
     const supabase = createClient();
-    const today = new Date().toISOString().split("T")[0];
+    const today = toLocalYYYYMMDD(new Date());
 
     async function load() {
       const [clsRes, logsRes] = await Promise.all([
@@ -51,18 +52,25 @@ export default function ClassDetailPage() {
   }, [profile, id]);
 
   const handleApprove = async (logId: string) => {
-    if (!profile) return;
+    if (!profile || actionStates[logId] === "loading" || flagStates[logId] === "loading") return;
     setActionStates(prev => ({ ...prev, [logId]: "loading" }));
     
     try {
       const supabase = createClient();
       
-      const { error: updateError } = await supabase.from("attendance_logs").update({
+      const { data, error: updateError } = await supabase.from("attendance_logs").update({
         status: "approved",
         teacher_note_summary: "Verified by teacher",
-      }).eq("id", logId);
+      }).eq("id", logId).eq("status", "pending_teacher_view").select();
       
       if (updateError) throw new Error(updateError.message);
+
+      if (!data || data.length === 0) {
+        // Already processed by another action
+        setActionStates(prev => ({ ...prev, [logId]: "idle" }));
+        toast.info("This attendance log was already reviewed.");
+        return;
+      }
 
       // Create review record
       await supabase.from("attendance_reviews").insert({
@@ -73,9 +81,27 @@ export default function ClassDetailPage() {
         note: "Verified by teacher",
       });
 
+      const targetLog = logs.find((l) => l.id === logId);
+      const studentName = (targetLog?.profiles as any)?.full_name || "A student";
+
       setLogs((prev) => prev.map((l) => l.id === logId ? { ...l, status: "approved" as const, teacher_note_summary: "Verified by teacher" } : l));
       setActionStates(prev => ({ ...prev, [logId]: "success" }));
       toast.success("Attendance verified successfully!");
+
+      // Notify admins about the attendance approval
+      fetch("/api/notify-admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "attendance_approved",
+          category: "transactional",
+          priority: "low",
+          title: "Attendance Approved by Teacher",
+          message: `Teacher ${profile.full_name || "A teacher"} verified and approved attendance for ${studentName}.`,
+          action_url: "/admin/attendance",
+        }),
+      }).catch(err => console.error("Failed to send admin notification:", err));
+
       setTimeout(() => setActionStates(prev => ({ ...prev, [logId]: "idle" })), 2000);
     } catch (err: unknown) {
       setActionStates(prev => ({ ...prev, [logId]: "error" }));
@@ -85,7 +111,7 @@ export default function ClassDetailPage() {
   };
 
   const handleFlagWithReason = async (logId: string) => {
-    if (!profile) return;
+    if (!profile || actionStates[logId] === "loading" || flagStates[logId] === "loading") return;
     const finalReason = selectedReason === "custom" ? customReason : selectedReason;
     if (!finalReason) {
       toast.error("Please select a reason or write a custom description.");
@@ -97,13 +123,23 @@ export default function ClassDetailPage() {
     try {
       const supabase = createClient();
       
-      const { error: updateError } = await supabase.from("attendance_logs").update({
+      const { data, error: updateError } = await supabase.from("attendance_logs").update({
         status: "pending_admin_review",
         teacher_flag_status: "flagged",
         teacher_note_summary: finalReason,
-      }).eq("id", logId);
+      }).eq("id", logId).eq("status", "pending_teacher_view").select();
       
       if (updateError) throw new Error(updateError.message);
+
+      if (!data || data.length === 0) {
+        // Already processed
+        setFlagStates(prev => ({ ...prev, [logId]: "idle" }));
+        setActiveFlaggingLog(null);
+        setSelectedReason("");
+        setCustomReason("");
+        toast.info("This attendance log was already reviewed.");
+        return;
+      }
 
       // Create review record
       await supabase.from("attendance_reviews").insert({
@@ -113,6 +149,9 @@ export default function ClassDetailPage() {
         action: "rejected", // Teachers mark it as rejected/flagged for admin
         note: finalReason,
       });
+
+      const targetLog = logs.find((l) => l.id === logId);
+      const studentName = (targetLog?.profiles as any)?.full_name || "A student";
 
       setLogs((prev) => prev.map((l) => l.id === logId ? { 
         ...l, 
@@ -126,6 +165,21 @@ export default function ClassDetailPage() {
       setSelectedReason("");
       setCustomReason("");
       toast.success("Submission flagged for review.");
+
+      // Notify admins about the flagged submission
+      fetch("/api/notify-admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "flagged_submission",
+          category: "alert",
+          priority: "high",
+          title: "Attendance Submission Flagged ⚠️",
+          message: `Teacher ${profile.full_name || "A teacher"} flagged attendance for ${studentName}. Reason: ${finalReason}`,
+          action_url: "/admin/flagged",
+        }),
+      }).catch(err => console.error("Failed to send admin notification:", err));
+
       setTimeout(() => setFlagStates(prev => ({ ...prev, [logId]: "idle" })), 2000);
     } catch (err: unknown) {
       setFlagStates(prev => ({ ...prev, [logId]: "error" }));
@@ -211,10 +265,7 @@ export default function ClassDetailPage() {
                         <MapPin className="h-3.5 w-3.5" />
                         {log.within_radius ? t.teacher.inRadius : t.teacher.outRadius} ({formatDistance(log.distance_m)})
                       </span>
-                      <span className={`flex items-center gap-1 ${log.within_time_window ? "text-emerald-600 dark:text-emerald-500" : "text-amber-600 dark:text-amber-500"}`}>
-                        <Clock className="h-3.5 w-3.5" />
-                        {log.within_time_window ? t.teacher.onTime : t.teacher.late}
-                      </span>
+                      <ArrivalBadge log={log} showIcon />
                     </div>
 
                     {/* Fraud flags list */}

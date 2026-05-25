@@ -12,6 +12,8 @@ export default function AdminShopPage() {
   const { t, interpolate, isClient } = useTranslation();
   const [items, setItems] = useState<(ShopItem & { cosmetics: Cosmetic | null })[]>([]);
   const [cosmetics, setCosmetics] = useState<Cosmetic[]>([]);
+  const [schools, setSchools] = useState<{id: string, name: string}[]>([]);
+  const [classes, setClasses] = useState<{id: string, name: string, school_id: string}[]>([]);
   const [loading, setLoading] = useState(true);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -26,7 +28,9 @@ export default function AdminShopPage() {
     price_coins: 0,
     featured: false,
     active: true,
-    cosmetic_id: ""
+    cosmetic_id: "",
+    school_id: "" as string | null,
+    class_id: "" as string | null
   });
 
   useEffect(() => {
@@ -36,13 +40,15 @@ export default function AdminShopPage() {
 
   async function fetchItems() {
     const supabase = createClient();
-    const { data } = await supabase
-      .from("shop_items")
-      .select("*, cosmetics(*)")
-      .order("featured", { ascending: false })
-      .order("created_at", { ascending: false });
+    const [itemsRes, schoolsRes, classesRes] = await Promise.all([
+      supabase.from("shop_items").select("*, cosmetics(*)").order("featured", { ascending: false }).order("created_at", { ascending: false }),
+      supabase.from("schools").select("id, name").order("name"),
+      supabase.from("classes").select("id, name, school_id").order("name")
+    ]);
     
-    if (data) setItems(data as any);
+    if (itemsRes.data) setItems(itemsRes.data as any);
+    if (schoolsRes.data) setSchools(schoolsRes.data);
+    if (classesRes.data) setClasses(classesRes.data);
     setLoading(false);
   }
 
@@ -62,7 +68,9 @@ export default function AdminShopPage() {
         price_coins: item.price_coins || 0,
         featured: item.featured,
         active: item.active,
-        cosmetic_id: item.cosmetic_id || ""
+        cosmetic_id: item.cosmetic_id || "",
+        school_id: item.school_id || "",
+        class_id: item.class_id || ""
       });
     } else {
       setEditingItem(null);
@@ -73,7 +81,9 @@ export default function AdminShopPage() {
         price_coins: 0,
         featured: false,
         active: true,
-        cosmetic_id: ""
+        cosmetic_id: "",
+        school_id: "",
+        class_id: ""
       });
     }
     setIsModalOpen(true);
@@ -96,6 +106,8 @@ export default function AdminShopPage() {
       featured: formData.featured,
       active: formData.active,
       cosmetic_id: formData.cosmetic_id || null,
+      school_id: formData.school_id || null,
+      class_id: formData.class_id || null,
       price_rp: 0 // Default for now since we use coins
     };
 
@@ -171,14 +183,29 @@ export default function AdminShopPage() {
         {items.map((item) => (
           <div key={item.id} className={`card rounded-2xl p-5 border-2 transition-all ${!item.active ? 'opacity-60 border-transparent' : item.featured ? 'border-primary/50' : 'border-transparent'}`}>
             <div className="flex justify-between items-start mb-3">
-              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                item.category === 'theme' ? 'bg-purple-500/10 text-purple-500' :
-                item.category === 'frame' ? 'bg-blue-500/10 text-blue-500' :
-                item.category === 'shield' ? 'bg-amber-500/10 text-amber-500' :
-                'bg-muted text-muted-foreground'
-              }`}>
-                {item.category}
-              </span>
+              <div className="flex flex-wrap gap-1">
+                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                  item.category === 'theme' ? 'bg-purple-500/10 text-purple-500' :
+                  item.category === 'frame' ? 'bg-blue-500/10 text-blue-500' :
+                  item.category === 'shield' ? 'bg-amber-500/10 text-amber-500' :
+                  'bg-muted text-muted-foreground'
+                }`}>
+                  {item.category}
+                </span>
+                {!item.school_id && !item.class_id ? (
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-500">
+                    Global
+                  </span>
+                ) : item.school_id && !item.class_id ? (
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500">
+                    School
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500">
+                    Class
+                  </span>
+                )}
+              </div>
               <div className="flex gap-1">
                 <button onClick={() => toggleFeatured(item.id, item.featured)} className={`p-1.5 rounded-md hover:bg-muted ${item.featured ? 'text-amber-500' : 'text-muted-foreground'}`}>
                   <Star className={`h-4 w-4 ${item.featured ? 'fill-current' : ''}`} />
@@ -262,6 +289,36 @@ export default function AdminShopPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
+                  <label className="text-sm font-medium mb-1 block">Scope: School</label>
+                  <select 
+                    className="input w-full" 
+                    value={formData.school_id || ""} 
+                    onChange={(e) => setFormData({ ...formData, school_id: e.target.value, class_id: "" })}
+                  >
+                    <option value="">Global (All Schools)</option>
+                    {schools.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1 block">Scope: Class</label>
+                  <select 
+                    className="input w-full" 
+                    value={formData.class_id || ""} 
+                    onChange={(e) => setFormData({ ...formData, class_id: e.target.value })}
+                    disabled={!formData.school_id}
+                  >
+                    <option value="">All Classes in School</option>
+                    {classes.filter(c => c.school_id === formData.school_id).map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
                   <label className="text-sm font-medium mb-1 block">{t.adminShop.categoryLabel}</label>
                   <select 
                     className="input w-full" 
@@ -280,7 +337,7 @@ export default function AdminShopPage() {
                     type="number" 
                     className="input w-full" 
                     value={formData.price_coins} 
-                    onChange={(e) => setFormData({ ...formData, price_coins: parseInt(e.target.value) || 0 })}
+                    onChange={(e) => setFormData({ ...formData, price_coins: e.target.value === '' ? ('' as any) : (parseInt(e.target.value) || 0) })}
                   />
                 </div>
               </div>

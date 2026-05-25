@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useTranslation } from "@/lib/i18n/use-translation";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { ArrivalBadge } from "@/components/shared/arrival-badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { formatDate, formatTime, formatDistance, formatAccuracy } from "@/lib/utils/format";
 import { flagLabel, type FraudFlag } from "@/lib/utils/fraud-flags";
@@ -114,7 +115,7 @@ export default function FlaggedCasesPage() {
                     <div className="bg-muted rounded-lg p-2"><span className="text-muted-foreground">{t.adminAttendance.distance}:</span> <span className="font-medium">{formatDistance(log.distance_m)}</span></div>
                     <div className="bg-muted rounded-lg p-2"><span className="text-muted-foreground">{t.adminAttendance.accuracy}:</span> <span className="font-medium">{formatAccuracy(log.accuracy_m)}</span></div>
                     <div className="bg-muted rounded-lg p-2"><span className="text-muted-foreground">{t.adminAttendance.inRadius}:</span> <span className={`font-medium ${log.within_radius ? "text-emerald-500" : "text-red-400"}`}>{log.within_radius ? t.adminAttendance.yes : t.adminAttendance.no}</span></div>
-                    <div className="bg-muted rounded-lg p-2"><span className="text-muted-foreground">{t.adminAttendance.onTime}:</span> <span className={`font-medium ${log.within_time_window ? "text-emerald-500" : "text-red-400"}`}>{log.within_time_window ? t.adminAttendance.yes : t.adminAttendance.no}</span></div>
+                    <div className="bg-muted rounded-lg p-2"><span className="text-muted-foreground">Timing:</span> <div><ArrivalBadge log={log} showIcon /></div></div>
                   </div>
                   {log.fraud_flags && log.fraud_flags.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-2">

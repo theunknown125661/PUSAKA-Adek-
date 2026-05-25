@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
 
     // 2. Parse request body
     const body = await request.json();
-    const { email, password, full_name, role } = body;
+    const { email, password, full_name, role, school_id } = body;
 
     if (!email || !password || !full_name || !role) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -70,6 +70,16 @@ export async function POST(request: NextRequest) {
 
     if (createError) {
       return NextResponse.json({ error: createError.message }, { status: 400 });
+    }
+
+    // 4. Update school_id in profiles if provided
+    if (school_id) {
+      // The trigger might take a few ms to create the profile, so we can retry or use upsert
+      // But usually it's instant in Postgres.
+      await adminAuthClient
+        .from("profiles")
+        .update({ school_id })
+        .eq("id", newUser.user.id);
     }
 
     return NextResponse.json({ success: true, user: newUser.user });
